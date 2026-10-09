@@ -1,122 +1,94 @@
-﻿// Popup list created by Eric Haines
-// ComboBox Extended by Hyungseok Seo.(Jerry) sdragoon@nate.com
-// this oop version of ComboBox is refactored by zhujiangbo jumbozhu@gmail.com
-// Modified by MarC0 / ManlyMarco
-
 using System;
 using UnityEngine;
 
 namespace ConfigurationManager.Utilities
 {
-    internal class ComboBox
+    internal sealed class ComboBox
     {
-        private static bool forceToUnShow;
-        private static int useControlID = -1;
-        private readonly string buttonStyle;
-        private bool isClickedComboButton;
-        private readonly GUIContent[] listContent;
-        private readonly GUIStyle listStyle;
-        private readonly int _windowYmax;
+        private static ComboBox _active;
+        private static bool _activeWasDrawn;
+        internal static bool IsOpen => _active != null;
+        private readonly GUIContent[] _items;
+        private readonly GUIStyle _style;
+        private Vector2 _scroll;
+        public Rect Rect { get; set; }
+        public GUIContent ButtonContent { get; set; }
+        public Rect Bounds { get; set; }
+        public static Action CurrentDropdownDrawer { get; set; }
 
-        public ComboBox(Rect rect, GUIContent buttonContent, GUIContent[] listContent, GUIStyle listStyle, float windowYmax)
+        public ComboBox(Rect rect, GUIContent buttonContent, GUIContent[] items, GUIStyle style, float windowYmax)
         {
-            Rect = rect;
-            ButtonContent = buttonContent;
-            this.listContent = listContent;
-            buttonStyle = "button";
-            this.listStyle = listStyle;
-            _windowYmax = (int)windowYmax;
+            Rect = rect; ButtonContent = buttonContent; _items = items; _style = style;
+            Bounds = new Rect(0, 0, float.MaxValue, windowYmax);
+        }
+        internal static void Close() { _active = null; CurrentDropdownDrawer = null; }
+        internal static void BeginFrame() { _activeWasDrawn = false; CurrentDropdownDrawer = null; }
+        internal static void EndFrame() { if (!_activeWasDrawn) Close(); }
+
+        public void Show(Action<int> select)
+        {
+            var enabled = GUI.enabled;
+#if IL2CPP
+            var visible = ManagedLayout.Visible(Rect);
+#else
+            var visible = Rect.width > 0 && Rect.height > 0;
+#endif
+            try
+            {
+                GUI.enabled = enabled && visible && (_active == null || _active == this);
+                if (GUI.Button(Rect, ButtonContent, _style))
+                {
+                    if (_active == this) Close();
+                    else { _active = this; _scroll = Vector2.zero; }
+                }
+            }
+            finally { GUI.enabled = enabled; }
+            if (_active != this) return;
+            if (!enabled || !visible || _items.Length == 0) { Close(); return; }
+            _activeWasDrawn = true;
+            var anchor = GUIUtility.GUIToScreenPoint(new Vector2(Rect.x, Rect.yMax));
+            var width = Rect.width;
+            CurrentDropdownDrawer = () => DrawPopup(anchor, width, select);
         }
 
-        public Rect Rect { get; set; }
-
-        public GUIContent ButtonContent { get; set; }
-
-        public void Show(Action<int> onItemSelected)
+        private void DrawPopup(Vector2 anchor, float width, Action<int> select)
         {
-            if (forceToUnShow)
+            if (_active != this) return;
+            const float rowHeight = 32;
+            var height = Mathf.Min(Mathf.Min(256, _items.Length * rowHeight), Mathf.Max(0, Bounds.height - 64));
+            var screenY = anchor.y + height > Bounds.yMax - 12 ? anchor.y - Rect.height - height : anchor.y;
+            screenY = Mathf.Max(Bounds.y + 48, Mathf.Min(screenY, Bounds.yMax - height - 12));
+            width = Mathf.Min(width, Mathf.Max(0, Bounds.width - 36));
+            var screenX = Mathf.Max(Bounds.x + 18, Mathf.Min(anchor.x, Bounds.xMax - width - 18));
+            var local = GUIUtility.ScreenToGUIPoint(new Vector2(screenX, screenY));
+            var outer = new Rect(local.x, local.y, width, height);
+            var evt = Event.current;
+            if (evt.type == EventType.KeyDown && evt.keyCode == KeyCode.Escape ||
+                evt.type == EventType.MouseDown && !outer.Contains(evt.mousePosition) &&
+                !new Rect(GUIUtility.ScreenToGUIPoint(anchor).x, GUIUtility.ScreenToGUIPoint(anchor).y - Rect.height, Rect.width, Rect.height).Contains(evt.mousePosition))
             {
-                forceToUnShow = false;
-                isClickedComboButton = false;
+                Close(); evt.Use(); return;
             }
-
-            var done = false;
-            var controlID = GUIUtility.GetControlID(FocusType.Passive);
-
-            Vector2 currentMousePosition = Vector2.zero;
-            if (Event.current.GetTypeForControl(controlID) == EventType.MouseUp)
+            var enabled = GUI.enabled; var color = GUI.color;
+            try
             {
-                if (isClickedComboButton)
+                GUI.enabled = true; GUI.color = Color.white;
+                GUI.Box(outer, GUIContent.none, GUI.skin.box);
+                _scroll = ImguiCompatibility.BeginFixedScrollView(outer, _scroll,
+                    new Rect(0, 0, Mathf.Max(0, outer.width - 16), _items.Length * rowHeight), false, false);
+                try
                 {
-                    done = true;
-                    currentMousePosition = Event.current.mousePosition;
-                }
-            }
-
-            if (GUI.Button(Rect, ButtonContent, buttonStyle))
-            {
-                if (useControlID == -1)
-                {
-                    useControlID = controlID;
-                    isClickedComboButton = false;
-                }
-
-                if (useControlID != controlID)
-                {
-                    forceToUnShow = true;
-                    useControlID = controlID;
-                }
-                isClickedComboButton = true;
-            }
-
-            if (isClickedComboButton)
-            {
-                GUI.enabled = false;
-                GUI.color = new Color(1, 1, 1, 2);
-
-                var location = GUIUtility.GUIToScreenPoint(new Vector2(Rect.x, Rect.y + listStyle.CalcHeight(listContent[0], 1.0f)));
-                var size = new Vector2(Rect.width, listStyle.CalcHeight(listContent[0], 1.0f) * listContent.Length);
-
-                var innerRect = new Rect(0, 0, size.x, size.y);
-
-                var outerRectScreen = new Rect(location.x, location.y, size.x, size.y);
-                if (outerRectScreen.yMax > _windowYmax)
-                {
-                    outerRectScreen.height = _windowYmax - outerRectScreen.y;
-                    outerRectScreen.width += 20;
-                }
-
-                if (currentMousePosition != Vector2.zero && outerRectScreen.Contains(GUIUtility.GUIToScreenPoint(currentMousePosition)))
-                    done = false;
-
-                CurrentDropdownDrawer = () =>
-                {
-                    GUI.enabled = true;
-
-                    var scrpos = GUIUtility.ScreenToGUIPoint(location);
-                    var outerRectLocal = new Rect(scrpos.x, scrpos.y, outerRectScreen.width, outerRectScreen.height);
-
-                    ImguiUtils.DrawContolBackground(outerRectLocal);
-
-                    _scrollPosition = GUI.BeginScrollView(outerRectLocal, _scrollPosition, innerRect, false, false);
+                    for (var i = 0; i < _items.Length; i++)
                     {
-                        const int initialSelectedItem = -1;
-                        var newSelectedItemIndex = GUI.SelectionGrid(innerRect, initialSelectedItem, listContent, 1, listStyle);
-                        if (newSelectedItemIndex != initialSelectedItem)
+                        if (GUI.Button(new Rect(0, i * rowHeight, Mathf.Max(0, outer.width - 16), rowHeight), _items[i], _style))
                         {
-                            onItemSelected(newSelectedItemIndex);
-                            isClickedComboButton = false;
+                            Close(); select(i); break;
                         }
                     }
-                    GUI.EndScrollView(true);
-                };
+                }
+                finally { ImguiCompatibility.EndFixedScrollView(); }
             }
-
-            if (done)
-                isClickedComboButton = false;
+            finally { GUI.enabled = enabled; GUI.color = color; }
         }
-
-        private Vector2 _scrollPosition = Vector2.zero;
-        public static Action CurrentDropdownDrawer { get; set; }
     }
 }

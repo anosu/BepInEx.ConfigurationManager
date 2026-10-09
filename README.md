@@ -9,11 +9,86 @@ The configuration manager can be accessed in-game by pressing the hotkey (by def
 There are two versions of this plugin, for BepInEx 5 (version 5.4.20 or newer, mono only) and BepInEx 6 (nightly build 664 or newer, IL2CPP only).
 
 - Install and configure the correct BepInEx version for your game (see above).
-- Download latest release for your BepInEx from the [Releases](https://github.com/BepInEx/BepInEx.ConfigurationManager/releases).
+- Download latest release for your BepInEx from this fork's [Releases](https://github.com/anosu/BepInEx.ConfigurationManager/releases).
 - Extract the plugin directly into your game directory, where the BepInEx folder is (the .dll should end up inside your BepInEx\Plugins folder).
 - Start the game and press F1.
 
 Note: The .xml file include in the release zip is useful for plugin developers when referencing ConfigurationManager.dll in your plugin, it will provide descriptions for types and methods to your IDE. Users can ignore it.
+
+See [CHANGELOG.md](CHANGELOG.md) for changes in this fork.
+
+### Language / 界面语言
+Click the `Language: English` button beside the search box to switch to `简体中文`.
+The choice is saved in `BepInEx/config/com.bepis.bepinex.configurationmanager.cfg` under `[General]`, `Language`.
+The default is English. This translates the manager controls and tips; plugin-provided names and descriptions remain unchanged.
+
+The manager uses a dark card-based interface with white text on blue selection states, larger text, consistent controls and an 820-pixel window
+(limited by the available screen width). Its skin is applied only while drawing the manager.
+On IL2CPP, the window remains modal after dragging. Press F1 again or click Close to dismiss it.
+Unity uGUI EventSystem input dispatch is suppressed while the window is open; EventSystems remain enabled and available for raycasts.
+Closing immediately permits input dispatch again; the game is not paused.
+The manager does not patch game-specific input services. Independent gameplay input polling outside Unity's UI systems
+requires integration in the game's own mod; generic UI modality cannot block every game's input path.
+Setting text edits save on Enter or focus loss, and pending edits are committed when closing. Escape discards the active draft.
+Search updates immediately. Reset has a fixed readable text button, and numeric inputs do not shrink it.
+Plugin expansion is tracked by GUID and survives temporary filtering; Expand All / Collapse All resets that state.
+Dropdowns close when their setting is hidden or disabled. An empty search/filter result displays a localized hint.
+
+点击搜索框旁的 `Language: English` 按钮可切换到简体中文，再次点击可切回英文。语言选择会自动保存。
+中文显示优先使用系统中的微软雅黑、黑体或 Noto Sans CJK SC 等字体；若显示方框，请安装支持中文的字体并重启游戏。
+
+For IL2CPP, install both `ConfigurationManager.dll` and `BepInEx.KeyboardShortcut.dll` from the release archive.
+The manager uses the bundled shortcut implementation and also edits newer native IL2CPP shortcuts when present,
+without requiring the newer `BepInEx.Unity.IL2CPP.Configuration.KeyboardShortcut` type during startup.
+Input uses the runtime's `BepInEx.UnityInput` API when available and otherwise falls back to `UnityEngine.Input`,
+so older IL2CPP runtimes do not need the newer input type. Replace both plugin DLLs together when upgrading.
+Do not replace game-specific BepInEx or Unity assemblies with build dependencies.
+
+### Build and regression checks
+```sh
+dotnet build ConfigurationManager.sln -c Release
+dotnet run --project tests/CompatibilityChecks -- bin/IL2CPP/ConfigurationManager.dll
+dotnet run --project tests/InputChecks
+dotnet run --project tests/InputChecks -p:UseModernApi=true
+dotnet run --project tests/TextEditChecks
+dotnet run --project tests/ScrollChecks
+dotnet run --project tests/ManagedUiChecks
+dotnet run --project tests/SettingChecks
+dotnet run --project tests/WindowChecks -- --self-test
+# Optional: validate against a specific game's generated interop assemblies.
+dotnet run --project tests/WindowChecks -- "/path/to/game/BepInEx/interop"
+```
+The checks inspect both compiled DLLs for incompatible shortcut/input type references, validate language text and fallback,
+verify release assemblies, and exercise the production input adapter against old and new runtime fixtures.
+Actual game loading and font rendering require an in-game check.
+The IL2CPP window uses `GUI.ModalWindow` with a fixed rectangle instead of `GUILayout.Window`,
+whose `LayoutedWindow` helper can be stripped even when the outer method exists.
+WindowChecks prepares the window call and plugin/shortcut method bodies for JIT compilation against
+the specified game's assemblies without launching the game, including constructors and static initializers.
+Its self-test verifies failure stubs reachable only from these startup paths. It also traverses calls into Unity methods and rejects
+reachable `Method unstripping failed` stubs or missing references. This validates managed compatibility, not native execution or visual layout.
+It also resolves the Unity EventSystem input-dispatch hook target against the supplied interop assemblies.
+The IL2CPP manager computes the full layout tree in managed code and draws through basic `GUI` primitives.
+It does not create native GUILayout groups, allocate GUILayout rectangles or construct native layout options.
+Content stays within the vertical viewport across language changes, expansion and scrolling; clip cleanup runs in `finally`.
+Tooltips use visible hit tests, a short hover delay and a light background with dark text, and clear when the pointer leaves.
+Dropdowns restore GUI state and clipping even if a selection callback throws.
+Text editing preserves focused numeric drafts and draws selection and a blinking caret separately from the text.
+It supports drag selection, word navigation, clipboard shortcuts, undo/redo and Tab/Shift+Tab focus traversal.
+Update and IMGUI shortcut handling share a press/release gate, so text focus and repeated KeyDown events do not toggle twice.
+Native IME composition is not provided by the local editor.
+ScrollChecks verifies that wheel offsets survive layout measurement and repaint, while collapsing content still clamps the offset.
+ManagedUiChecks exercises the production layout and interaction adapters with deterministic GUI primitive fixtures,
+including localized narrow windows, filtering, numeric drafts, tooltip lifetime and injected drawer/selection failures.
+These fixtures do not execute Unity's native rendering.
+SettingChecks exercises the production drawers and IL2CPP setting collector, covering exact typed range commits,
+scientific notation, writable/read-only property metadata, hidden shortcut capture cancellation and per-plugin collection failures.
+Range text inputs retain the configuration type's precision; slider movement remains limited to Unity's float precision.
+Invalid or nonfinite numeric drafts leave the accepted value unchanged. Filtering or collapsing a setting cancels its shortcut capture.
+
+Window fonts, skin and tip presentation live in `ConfigurationManager.Shared/ConfigurationManager.Appearance.cs`.
+Shared control dimensions are defined by `ModernSkin`; `PluginCollapseState` owns expansion preferences independently of the visible list.
+The drawer frame lifecycle tracks both shortcut capture and dropdown ownership, closing overlays when their owner disappears.
 
 ### Known issues
 - If no text is visible anywhere in RUE windows, most likely the `Arial.ttf` font is missing from the system (Unity UI default font, may be different in some games). This can happen when running a game on Linux with [misconfigured wine](https://github.com/ManlyMarco/RuntimeUnityEditor/issues/55).
@@ -82,6 +157,11 @@ Config.Bind("X", "3", 3, new ConfigDescription("", null, new ConfigurationManage
 ```
 
 ### How to make a custom editor for my setting?
+The following GUILayout custom-drawer APIs apply to the Mono version. The IL2CPP version uses the standard type-based
+editors in place of external CustomDrawer, CustomHotkeyDrawer and registered GUILayout delegates, because those delegates
+cannot safely share the managed layout tree. Unsupported types display their serialized value. Configuration metadata,
+value converters, acceptable ranges/lists and standard hotkey editing continue to apply.
+
 If you are using a setting type that is not supported by ConfigurationManager, you can add a drawer Action for it. The Action will be executed inside OnGUI, use GUILayout to draw your setting as shown in the example below.
 
 To use a custom seting drawer for an individual setting, use the `CustomDrawer` field in the attribute class. See above for more info on the attribute class.

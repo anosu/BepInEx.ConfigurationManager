@@ -18,6 +18,8 @@ using BepInEx.Unity.IL2CPP;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.Injection;
 using BaseUnityPlugin = BepInEx.Unity.IL2CPP.BasePlugin;
+using UnityInput = BepInEx.Configuration.CompatibleUnityInput;
+using GUILayout = ConfigurationManager.Utilities.ManagedLayout;
 #endif
 
 namespace ConfigurationManager
@@ -28,7 +30,7 @@ namespace ConfigurationManager
     /// </summary>
     [BepInPlugin(GUID, "Configuration Manager", Constants.Version)]
     [Browsable(false)]
-    public class ConfigurationManager : BaseUnityPlugin
+    public partial class ConfigurationManager : BaseUnityPlugin
     {
         /// <summary>
         /// GUID of this plugin
@@ -40,7 +42,11 @@ namespace ConfigurationManager
         /// </summary>
         public const string Version = Constants.Version;
 
+#if IL2CPP
         internal static ManualLogSource Logger;
+#else
+        internal new static ManualLogSource Logger;
+#endif
         private static SettingFieldDrawer _fieldDrawer;
 
         private static readonly Color _advancedSettingColor = new Color(1f, 0.95f, 0.67f, 1f);
@@ -66,21 +72,18 @@ namespace ConfigurationManager
         private string _modsWithoutSettings;
 
         private List<SettingEntryBase> _allSettings;
-        private List<PluginSettingsData> _filteredSetings = new List<PluginSettingsData>();
+        private List<PluginSettingsData> _filteredSettings = new List<PluginSettingsData>();
 
         internal Rect SettingWindowRect { get; private set; }
-        private bool _windowWasMoved;
 
         /// <summary>
-        /// Window is visible and is blocking the whole screen. This is true until the user moves the window, which lets it run while user interacts with the game.
+        /// Window is visible and blocks interaction with the game, including after dragging.
         /// </summary>
-        public bool IsWindowFullscreen => DisplayingWindow && !_windowWasMoved;
+        public bool IsWindowFullscreen => DisplayingWindow;
 
         private bool _tipsPluginHeaderWasClicked, _tipsWindowWasMoved;
 
-        private Rect _screenRect;
         private Vector2 _settingWindowScrollPos;
-        private int _tipsHeight;
 
         private PropertyInfo _curLockState;
         private PropertyInfo _curVisible;
@@ -96,7 +99,10 @@ namespace ConfigurationManager
         private readonly ConfigEntry<KeyboardShortcut> _keybind;
         private readonly ConfigEntry<bool> _hideSingleSection;
         private readonly ConfigEntry<bool> _pluginConfigCollapsedDefault;
+        private readonly PluginCollapseState _pluginCollapseState;
+        private readonly ConfigEntry<string> _language;
         private bool _showDebug;
+        private readonly HotkeyGate _hotkeyGate = new HotkeyGate();
 
         /// <inheritdoc />
         public ConfigurationManager()
@@ -116,6 +122,20 @@ namespace ConfigurationManager
                                       "The key can be overridden by a game-specific plugin if necessary, in that case this setting is ignored."));
             _hideSingleSection = Config.Bind("General", "Hide single sections", false, new ConfigDescription("Show section title for plugins with only one section"));
             _pluginConfigCollapsedDefault = Config.Bind("General", "Plugin collapsed default", true, new ConfigDescription("If set to true plugins will be collapsed when opening the configuration manager window"));
+            _pluginCollapseState = new PluginCollapseState(_pluginConfigCollapsedDefault.Value);
+            _pluginConfigCollapsedDefault.SettingChanged += (sender, args) =>
+            {
+                _pluginCollapseState.Reset(_pluginConfigCollapsedDefault.Value);
+                foreach (var plugin in _filteredSettings) plugin.Collapsed = _pluginConfigCollapsedDefault.Value;
+            };
+            _language = Config.Bind("General", "Language", Localization.English,
+                new ConfigDescription("Interface language / 界面语言", new AcceptableValueList<string>(Localization.English, Localization.SimplifiedChinese)));
+            Localization.Language = _language.Value;
+            _language.SettingChanged += (sender, args) =>
+            {
+                Localization.Language = _language.Value;
+                ClearWindowInteraction();
+            };
         }
 
 #if IL2CPP
@@ -132,6 +152,7 @@ namespace ConfigurationManager
             private void Update() => Plugin.Update();
             private void LateUpdate() => Plugin.LateUpdate();
             private void OnGUI() => Plugin.OnGUI();
+            private void OnDestroy() { if (Plugin != null) Plugin.DisplayingWindow = false; }
         }
 #endif
 
@@ -146,7 +167,10 @@ namespace ConfigurationManager
                 if (_displayingWindow == value) return;
                 _displayingWindow = value;
 
-                SettingFieldDrawer.ClearCache();
+                ClearWindowInteraction();
+#if IL2CPP
+                ModalInput.SetActive(value);
+#endif
 
                 if (_displayingWindow)
                 {
@@ -171,6 +195,15 @@ namespace ConfigurationManager
 
                 DisplayingWindowChanged?.Invoke(this, new ValueChangedEventArgs<bool>(value));
             }
+        }
+
+        private static void ClearWindowInteraction()
+        {
+            TooltipState.Update(null, true, 0);
+#if IL2CPP
+            ImguiCompatibility.ClearInput();
+#endif
+            SettingFieldDrawer.ClearCache();
         }
 
         /// <summary>
@@ -221,29 +254,13 @@ namespace ConfigurationManager
                     results = results.Where(x => x.IsAdvanced == true || IsKeyboardShortcut(x));
             }
 
-            const string shortcutsCatName = "Keyboard shortcuts";
-
-            var settingsAreCollapsed = _pluginConfigCollapsedDefault.Value;
-
-            var nonDefaultCollpasingStateByPluginName = new HashSet<string>();
-            foreach (var pluginSetting in _filteredSetings)
-            {
-                if (pluginSetting.Collapsed != settingsAreCollapsed)
-                {
-                    nonDefaultCollpasingStateByPluginName.Add(pluginSetting.Info.Name);
-                }
-            }
-
-            _filteredSetings = results
+            _filteredSettings = results
                 .GroupBy(x => x.PluginInfo)
                 .Select(pluginSettings =>
                 {
-                    var originalCategoryOrder = pluginSettings.Select(x => x.Category).Distinct().ToList();
-
+                    // GroupBy preserves the order of each category's first appearance.
                     var categories = pluginSettings
                         .GroupBy(x => x.Category)
-                        .OrderBy(x => originalCategoryOrder.IndexOf(x.Key))
-                        .ThenBy(x => x.Key)
                         .Select(x => new PluginSettingsData.PluginSettingsGroupData { Name = x.Key, Settings = x.OrderByDescending(set => set.Order).ThenBy(set => set.DispName).ToList() });
 
                     var website = Utils.GetWebsite(pluginSettings.First().PluginInstance);
@@ -252,7 +269,7 @@ namespace ConfigurationManager
                     {
                         Info = pluginSettings.Key,
                         Categories = categories.ToList(),
-                        Collapsed = nonDefaultCollpasingStateByPluginName.Contains(pluginSettings.Key.Name) ? !settingsAreCollapsed : settingsAreCollapsed,
+                        Collapsed = _pluginCollapseState.Get(pluginSettings.Key.GUID),
                         Website = website
                     };
                 })
@@ -262,7 +279,7 @@ namespace ConfigurationManager
 
         private static bool IsKeyboardShortcut(SettingEntryBase x)
         {
-            return x.SettingType == typeof(KeyboardShortcut) || x.SettingType == typeof(KeyCode);
+            return SettingFieldDrawer.IsKeyboardShortcut(x.SettingType) || x.SettingType == typeof(KeyCode);
         }
 
         private static bool ContainsSearchString(SettingEntryBase setting, string[] searchStrings)
@@ -280,178 +297,177 @@ namespace ConfigurationManager
 
         private void CalculateWindowRect()
         {
-            var width = Mathf.Min(Screen.width, 650);
+            var width = Mathf.Min(Screen.width, ModernSkin.WindowWidth);
             var height = Screen.height < 560 ? Screen.height : Screen.height - 100;
             var offsetX = Mathf.RoundToInt((Screen.width - width) / 2f);
             var offsetY = Mathf.RoundToInt((Screen.height - height) / 2f);
             SettingWindowRect = new Rect(offsetX, offsetY, width, height);
 
-            _screenRect = new Rect(0, 0, Screen.width, Screen.height);
+            LeftColumnWidth = Mathf.RoundToInt(SettingWindowRect.width / 2.8f);
+            RightColumnWidth = Mathf.Max(80, (int)SettingWindowRect.width - LeftColumnWidth - 155);
 
-            LeftColumnWidth = Mathf.RoundToInt(SettingWindowRect.width / 2.5f);
-            RightColumnWidth = (int)SettingWindowRect.width - LeftColumnWidth - 115;
-
-            _windowWasMoved = false;
         }
 
         private void OnGUI()
         {
+            var evt = Event.current;
+            HandleShortcutEvent(evt);
             if (DisplayingWindow)
             {
                 SetUnlockCursor(0, true);
 
-                Vector2 mousePosition = UnityInput.Current.mousePosition;
-                mousePosition.y = Screen.height - mousePosition.y;
-
-                // If the window hasn't been moved by the user yet, block the whole screen and use a solid background to make the window easier to see
-                if (!_windowWasMoved)
+                var originalSkin = GUI.skin;
+                var originalColor = GUI.color;
+                var originalContentColor = GUI.contentColor;
+                var originalBackgroundColor = GUI.backgroundColor;
+                var originalMatrix = GUI.matrix;
+                var originalEnabled = GUI.enabled;
+                var originalFont = _modernSkin != null ? _modernSkin.font : originalSkin.font;
+                Rect newRect;
+                try
                 {
-                    if (GUI.Button(_screenRect, string.Empty, GUI.skin.box) && !SettingWindowRect.Contains(mousePosition))
-                        DisplayingWindow = false;
-
-                    ImguiUtils.DrawWindowBackground(SettingWindowRect);
+                    GUI.color = GUI.contentColor = GUI.backgroundColor = Color.white;
+                    GUI.matrix = Matrix4x4.identity;
+                    GUI.enabled = true;
+                    ApplyWindowAppearance(originalSkin);
+#if IL2CPP
+                    GUI.color = new Color(0, 0, 0, 0.55f);
+                    GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture);
+                    GUI.color = Color.white;
+                    newRect = GUI.ModalWindow(WindowId, SettingWindowRect, (GUI.WindowFunction)SettingsWindow, string.Empty);
+#else
+                    newRect = GUILayout.Window(WindowId, SettingWindowRect, (GUI.WindowFunction)SettingsWindow, string.Empty);
+#endif
                 }
-
-                var newRect = GUILayout.Window(WindowId, SettingWindowRect, (GUI.WindowFunction)SettingsWindow, "Plugin / mod settings");
+                finally
+                {
+                    if (_modernSkin != null) _modernSkin.font = originalFont;
+                    GUI.skin = originalSkin;
+                    GUI.color = originalColor;
+                    GUI.contentColor = originalContentColor;
+                    GUI.backgroundColor = originalBackgroundColor;
+                    GUI.matrix = originalMatrix;
+                    GUI.enabled = originalEnabled;
+                }
 
                 if (newRect != SettingWindowRect)
                 {
-                    _windowWasMoved = true;
                     SettingWindowRect = newRect;
 
                     _tipsWindowWasMoved = true;
                 }
 
-                if (!SettingFieldDrawer.SettingKeyboardShortcut && (!_windowWasMoved || SettingWindowRect.Contains(mousePosition)))
-                    UnityInput.Current.ResetInputAxes();
+                if (evt.type == EventType.MouseDown || evt.type == EventType.MouseUp || evt.type == EventType.ScrollWheel || evt.type == EventType.KeyDown)
+                    evt.Use();
             }
         }
 
+        private static readonly HoverState TooltipState = new HoverState();
+        private static GUIStyle _tooltipStyle;
         private static void DrawTooltip(Rect area)
         {
-            string tooltip = GUI.tooltip;
-            if (!string.IsNullOrEmpty(tooltip))
+            if (Event.current.type != EventType.Repaint) return;
+#if IL2CPP
+            var tooltip = ManagedLayout.Tooltip;
+#else
+            var tooltip = GUI.tooltip;
+#endif
+            TooltipState.Update(tooltip, ComboBox.IsOpen, Time.realtimeSinceStartup);
+            if (TooltipState.Visible(Time.realtimeSinceStartup))
             {
-                var style = GUI.skin.box.CreateCopy();
-                style.wordWrap = true;
-                style.alignment = TextAnchor.MiddleCenter;
-
-                GUIContent content = new GUIContent(tooltip);
-
-                const int width = 400;
-                var height = style.CalcHeight(content, 400) + 10;
-
+                if (_tooltipStyle == null)
+                {
+                    _tooltipStyle = GUI.skin.box.CreateCopy();
+                    _tooltipStyle.wordWrap = true;
+                    _tooltipStyle.alignment = TextAnchor.MiddleLeft;
+                    _tooltipStyle.normal.background = Texture2D.whiteTexture;
+                    _tooltipStyle.normal.textColor = new Color(0.07f, 0.10f, 0.14f);
+                    _tooltipStyle.padding = ModernSkin.Offset(12, 12, 10, 10);
+                }
+                var content = new GUIContent(TooltipState.Text);
+                var width = Mathf.Min(400, area.width - 36);
+                var height = _tooltipStyle.CalcHeight(content, width);
                 var mousePosition = Event.current.mousePosition;
-
-                var x = mousePosition.x + width > area.width
-                    ? area.width - width
-                    : mousePosition.x;
-
-                var y = mousePosition.y + 25 + height > area.height
-                    ? mousePosition.y - height
-                    : mousePosition.y + 25;
-
-                Rect position = new Rect(x, y, width, height);
-                ImguiUtils.DrawContolBackground(position, Color.black);
-                style.Draw(position, content, -1);
+                var x = Mathf.Clamp(mousePosition.x + 12, 18, Mathf.Max(18, area.width - width - 18));
+                var y = Mathf.Clamp(mousePosition.y + 22 + height > area.height ? mousePosition.y - height - 8 : mousePosition.y + 22,
+                    8, Mathf.Max(8, area.height - height - 8));
+                var previous = GUI.color;
+                try { GUI.color = Color.white; GUI.Box(new Rect(x, y, width, height), content, _tooltipStyle); }
+                finally { GUI.color = previous; }
             }
         }
 
         private void SettingsWindow(int id)
         {
-            DrawWindowHeader();
-
-            _settingWindowScrollPos = GUILayout.BeginScrollView(_settingWindowScrollPos, false, true);
-
-            var scrollPosition = _settingWindowScrollPos.y;
-            var scrollHeight = SettingWindowRect.height;
-
-            GUILayout.BeginVertical();
+            if (HandleShortcutEvent(Event.current) || !DisplayingWindow) return;
+            if (_windowTitleStyle == null)
             {
-                if (string.IsNullOrEmpty(SearchString))
+                _windowTitleStyle = GUI.skin.label.CreateCopy();
+                _windowTitleStyle.fontSize = 20;
+                _windowTitleStyle.alignment = TextAnchor.MiddleLeft;
+                _windowTitleStyle.padding = ModernSkin.Offset(0, 0, 0, 0);
+                _windowTitleStyle.wordWrap = false;
+            }
+            GUI.Label(new Rect(18, 8, Mathf.Max(0, SettingWindowRect.width - 36), 28),
+                Localization.Text("Plugin / mod settings"), _windowTitleStyle);
+
+#if IL2CPP
+            ManagedLayout.BeginFrame(new Rect(18, 48, Mathf.Max(0, SettingWindowRect.width - 36), Mathf.Max(0, SettingWindowRect.height - 64)));
+#endif
+            var enabled = GUI.enabled;
+            var color = GUI.color;
+            SettingFieldDrawer.BeginFrame();
+            try
+            {
+                DrawWindowHeader();
+                _settingWindowScrollPos = ImguiCompatibility.BeginScrollView(_settingWindowScrollPos, false, true);
+                try
                 {
-                    DrawTips();
-
-                    if (_tipsHeight == 0 && Event.current.type == EventType.Repaint)
-                        _tipsHeight = (int)GUILayoutUtility.GetLastRect().height;
-                }
-
-                var currentHeight = _tipsHeight;
-
-                foreach (var plugin in _filteredSetings)
-                {
-                    var visible = plugin.Height == 0 || currentHeight + plugin.Height >= scrollPosition && currentHeight <= scrollPosition + scrollHeight;
-
-                    if (visible)
+                    GUILayout.BeginVertical();
+                    try
                     {
-                        try
+                        if (string.IsNullOrEmpty(SearchString)) DrawTips();
+                        if (_filteredSettings.Count == 0)
+                            GUILayout.Label(Localization.Text(string.IsNullOrEmpty(SearchString) ? "No settings to display. Check the filters above." : "No matching settings. Try another search or clear it."));
+                        // Build every plugin on every event. Cached-height virtualization changes control order.
+                        foreach (var plugin in _filteredSettings.ToArray())
                         {
+#if IL2CPP
+                            using (ManagedLayout.Identity("plugin:" + plugin.Info.GUID))
+                            {
+                                var depth = ManagedLayout.Depth;
+                                try { DrawSinglePlugin(plugin); }
+                                catch (Exception ex) { ReportDrawError(plugin.Info.GUID, ex); }
+                                finally { ManagedLayout.RestoreDepth(depth); GUI.enabled = enabled; GUI.color = color; }
+                            }
+#else
                             DrawSinglePlugin(plugin);
-                        }
-#if IL2CPP
-                        catch (Il2CppException)
-#else
-                        catch (ArgumentException)
 #endif
-                        {
-                            // Needed to avoid GUILayout: Mismatched LayoutGroup.Repaint crashes on large lists
                         }
-
-                        if (plugin.Height == 0 && Event.current.type == EventType.Repaint)
-                            plugin.Height = (int)GUILayoutUtility.GetLastRect().height;
+                        if (_showDebug) GUILayout.Label(Localization.Text("Plugins with no options available: ") + _modsWithoutSettings);
+                        ImguiCompatibility.Space(12);
                     }
-                    else
-                    {
-                        try
-                        {
-                            GUILayout.Space(plugin.Height);
-                        }
-#if IL2CPP
-                        catch (Il2CppException)
-#else
-                        catch (ArgumentException)
-#endif
-                        {
-                            // Needed to avoid GUILayout: Mismatched LayoutGroup.Repaint crashes on large lists
-                        }
-                    }
-
-                    currentHeight += plugin.Height;
+                    finally { GUILayout.EndVertical(); }
                 }
-
-                if (_showDebug)
-                {
-                    GUILayout.Space(10);
-                    GUILayout.Label("Plugins with no options available: " + _modsWithoutSettings);
-                }
-                else
-                {
-                    // Always leave some space in case there's a dropdown box at the very bottom of the list
-                    GUILayout.Space(70);
-                }
+                finally { ImguiCompatibility.EndScrollView(); }
             }
-            GUILayout.EndVertical();
-            GUILayout.EndScrollView();
-
-            if (!SettingFieldDrawer.DrawCurrentDropdown())
-                DrawTooltip(SettingWindowRect);
-
-            GUI.DragWindow();
-        }
-
-        private void DrawTips()
-        {
-            var tip = !_tipsPluginHeaderWasClicked ? "Tip: Click plugin names to expand. Click setting and group names to see their descriptions." :
-                !_tipsWindowWasMoved ? "Tip: You can drag this window to move it. It will stay open while you interact with the game." : null;
-
-            if (tip != null)
+            finally
             {
-                GUILayout.BeginHorizontal();
+                try
                 {
-                    GUILayout.Label(tip);
+                    try { SettingFieldDrawer.EndFrame(); }
+                    finally
+                    {
+#if IL2CPP
+                        ManagedLayout.EndFrame();
+#endif
+                    }
                 }
-                GUILayout.EndHorizontal();
+                finally { GUI.enabled = enabled; GUI.color = color; }
             }
+            if (!ComboBox.IsOpen) GUI.DragWindow(new Rect(0, 0, SettingWindowRect.width, 38));
+            SettingFieldDrawer.DrawCurrentDropdown();
+            DrawTooltip(SettingWindowRect);
         }
 
         private void DrawWindowHeader()
@@ -460,50 +476,30 @@ namespace ConfigurationManager
             {
                 GUI.enabled = SearchString == string.Empty;
 
-                var newVal = GUILayout.Toggle(_showSettings.Value, "Normal settings");
-                if (_showSettings.Value != newVal)
-                {
-                    _showSettings.Value = newVal;
-                    BuildFilteredSettingList();
-                }
-
-                newVal = GUILayout.Toggle(_showKeybinds.Value, "Keyboard shortcuts");
-                if (_showKeybinds.Value != newVal)
-                {
-                    _showKeybinds.Value = newVal;
-                    BuildFilteredSettingList();
-                }
-
-                var origColor = GUI.color;
-                GUI.color = _advancedSettingColor;
-                newVal = GUILayout.Toggle(_showAdvanced.Value, "Advanced settings");
-                if (_showAdvanced.Value != newVal)
-                {
-                    _showAdvanced.Value = newVal;
-                    BuildFilteredSettingList();
-                }
-                GUI.color = origColor;
+                DrawFilter(_showSettings, "Normal");
+                DrawFilter(_showKeybinds, "Keys");
+                DrawFilter(_showAdvanced, "Advanced");
 
                 GUI.enabled = true;
 
-                GUILayout.Space(8);
+                ImguiCompatibility.Space(8);
 
-                newVal = GUILayout.Toggle(_showDebug, "Debug info");
+                var newVal = GUILayout.Toggle(_showDebug, Localization.Text("Debug"));
                 if (_showDebug != newVal)
                 {
                     _showDebug = newVal;
                     BuildSettingList();
                 }
 
-                if (GUILayout.Button("Open Log"))
+                if (GUILayout.Button(Localization.Text("Log")))
                 {
                     try { Utils.OpenLog(); }
                     catch (SystemException ex) { Logger.Log(LogLevel.Message | LogLevel.Error, ex.Message); }
                 }
 
-                GUILayout.Space(8);
+                ImguiCompatibility.Space(8);
 
-                if (GUILayout.Button("Close"))
+                if (GUILayout.Button(Localization.Text("Close")))
                 {
                     DisplayingWindow = false;
                 }
@@ -512,34 +508,48 @@ namespace ConfigurationManager
 
             GUILayout.BeginHorizontal(GUI.skin.box);
             {
-                GUILayout.Label("Search: ", GUILayout.ExpandWidth(false));
+                GUILayout.Label(Localization.Text("Search: "), ImguiCompatibility.ExpandWidth(false));
 
+#if IL2CPP
+                if (_focusSearchBox) ImguiCompatibility.FocusNextTextField();
+#else
                 GUI.SetNextControlName(SearchBoxName);
-                SearchString = GUILayout.TextField(SearchString, GUILayout.ExpandWidth(true));
+#endif
+                SearchString = ImguiCompatibility.TextField(SearchString, ImguiCompatibility.ExpandWidth(true));
 
                 if (_focusSearchBox)
                 {
                     GUI.FocusWindow(WindowId);
+#if !IL2CPP
                     GUI.FocusControl(SearchBoxName);
+#endif
                     _focusSearchBox = false;
                 }
 
-                if (GUILayout.Button("Clear", GUILayout.ExpandWidth(false)))
+                if (GUILayout.Button(Localization.Text("Clear"), ImguiCompatibility.ExpandWidth(false)))
                     SearchString = string.Empty;
 
-                GUILayout.Space(8);
+                if (GUILayout.Button(Localization.Text("Language") + ": " + _language.Value, ImguiCompatibility.ExpandWidth(false)))
+                    _language.Value = _language.Value == Localization.English ? Localization.SimplifiedChinese : Localization.English;
 
-                if (GUILayout.Button(_pluginConfigCollapsedDefault.Value ? "Expand All" : "Collapse All", GUILayout.ExpandWidth(false)))
+                ImguiCompatibility.Space(8);
+
+                if (GUILayout.Button(_pluginConfigCollapsedDefault.Value ? Localization.Text("Expand All") : Localization.Text("Collapse All"), ImguiCompatibility.ExpandWidth(false)))
                 {
                     var newValue = !_pluginConfigCollapsedDefault.Value;
                     _pluginConfigCollapsedDefault.Value = newValue;
-                    foreach (var plugin in _filteredSetings)
-                        plugin.Collapsed = newValue;
-
                     _tipsPluginHeaderWasClicked = true;
                 }
             }
             GUILayout.EndHorizontal();
+        }
+
+        private void DrawFilter(ConfigEntry<bool> filter, string label)
+        {
+            var value = GUILayout.Toggle(filter.Value, Localization.Text(label));
+            if (filter.Value == value) return;
+            filter.Value = value;
+            BuildFilteredSettingList();
         }
 
         /// <summary>
@@ -577,20 +587,20 @@ namespace ConfigurationManager
                 if (hasWebsite)
                 {
                     GUILayout.BeginHorizontal();
-                    GUILayout.Space(29); // Same as the URL button to keep the plugin name centered
                 }
 
                 if (SettingFieldDrawer.DrawPluginHeader(categoryHeader, plugin.Collapsed && !isSearching) && !isSearching)
                 {
                     _tipsPluginHeaderWasClicked = true;
                     plugin.Collapsed = !plugin.Collapsed;
+                    _pluginCollapseState.Set(plugin.Info.GUID, plugin.Collapsed);
                 }
 
                 if (hasWebsite)
                 {
                     var origColor = GUI.color;
                     GUI.color = Color.gray;
-                    if (GUILayout.Button(new GUIContent("URL", null, plugin.Website), GUI.skin.label, GUILayout.ExpandWidth(false)))
+                    if (GUILayout.Button(new GUIContent("URL", null, plugin.Website), GUI.skin.label, ImguiCompatibility.ExpandWidth(false)))
                         Utils.OpenWebsite(plugin.Website);
                     GUI.color = origColor;
                     GUILayout.EndHorizontal();
@@ -610,7 +620,7 @@ namespace ConfigurationManager
                     foreach (var setting in category.Settings)
                     {
                         DrawSingleSetting(setting);
-                        GUILayout.Space(2);
+                        ImguiCompatibility.Space(6);
                     }
                 }
             }
@@ -620,21 +630,53 @@ namespace ConfigurationManager
 
         private void DrawSingleSetting(SettingEntryBase setting)
         {
+#if IL2CPP
+            using (ManagedLayout.Identity("setting:" + System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(setting)))
+            {
+#endif
             GUILayout.BeginHorizontal();
+            var enabled = GUI.enabled;
+            var color = GUI.color;
+#if IL2CPP
+            var depth = ManagedLayout.Depth;
+#endif
+            try
             {
                 try
                 {
                     DrawSettingName(setting);
-                    _fieldDrawer.DrawSettingValue(setting);
+                    GUILayout.BeginHorizontal(ImguiCompatibility.ExpandWidth(true));
+                    try { _fieldDrawer.DrawSettingValue(setting); }
+                    finally { GUILayout.EndHorizontal(); }
                     DrawDefaultButton(setting);
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log(LogLevel.Error, $"Failed to draw setting {setting.DispName} - {ex}");
-                    GUILayout.Label("Failed to draw this field, check log for details.");
+                    ReportDrawError(setting.PluginInfo.GUID + "/" + setting.Category + "/" + setting.DispName, ex);
+#if IL2CPP
+                    ManagedLayout.RestoreDepth(depth);
+#endif
+                    GUILayout.Label(Localization.Text("Failed to draw this field, check log for details."));
                 }
             }
-            GUILayout.EndHorizontal();
+            finally
+            {
+#if IL2CPP
+                ManagedLayout.RestoreDepth(depth);
+#endif
+                GUI.enabled = enabled; GUI.color = color;
+                GUILayout.EndHorizontal();
+            }
+#if IL2CPP
+            }
+#endif
+        }
+
+        private static readonly HashSet<string> DrawErrors = new HashSet<string>();
+        private static void ReportDrawError(string key, Exception ex)
+        {
+            if (DrawErrors.Add(key + ":" + ex.GetType().FullName + ":" + ex.Message))
+                Logger.LogError("Failed to draw " + key + " - " + ex);
         }
 
         private void DrawSettingName(SettingEntryBase setting)
@@ -646,7 +688,7 @@ namespace ConfigurationManager
                 GUI.color = _advancedSettingColor;
 
             GUILayout.Label(new GUIContent(setting.DispName.TrimStart('!'), null, setting.Description),
-                GUILayout.Width(LeftColumnWidth), GUILayout.MaxWidth(LeftColumnWidth));
+                ImguiCompatibility.Width(LeftColumnWidth), ImguiCompatibility.MaxWidth(LeftColumnWidth));
 
             GUI.color = origColor;
         }
@@ -658,8 +700,8 @@ namespace ConfigurationManager
             object defaultValue = setting.DefaultValue;
             if (defaultValue != null || setting.SettingType.IsClass)
             {
-                GUILayout.Space(5);
-                if (GUILayout.Button("Reset", GUILayout.ExpandWidth(false)))
+                ImguiCompatibility.Space(5);
+                if (GUILayout.Button(Localization.Text("Reset"), ImguiCompatibility.Width(ModernSkin.ResetButtonWidth)))
                     setting.Set(defaultValue);
             }
         }
@@ -689,14 +731,47 @@ namespace ConfigurationManager
         {
             if (DisplayingWindow) SetUnlockCursor(0, true);
 
-            if (OverrideHotkey) return;
-
-            if (_keybind.Value.IsDown()) DisplayingWindow = !DisplayingWindow;
+            if (_keybind.Value.MainKey != KeyCode.None && UnityInput.Current.GetKeyUp(_keybind.Value.MainKey)) _hotkeyGate.Release();
+            if (OverrideHotkey || SettingFieldDrawer.SettingKeyboardShortcut) return;
+            if (_keybind.Value.IsDown() && _hotkeyGate.Press(Time.frameCount)) DisplayingWindow = !DisplayingWindow;
         }
 
         private void LateUpdate()
         {
-            if (DisplayingWindow) SetUnlockCursor(0, true);
+            if (DisplayingWindow)
+            {
+                SetUnlockCursor(0, true);
+#if IL2CPP
+                ModalInput.SetActive(true);
+#endif
+                if (!SettingFieldDrawer.SettingKeyboardShortcut) UnityInput.Current.ResetInputAxes();
+            }
+        }
+
+        private bool HandleShortcutEvent(Event evt)
+        {
+            if (evt.type == EventType.KeyUp && evt.keyCode == _keybind.Value.MainKey) _hotkeyGate.Release();
+            if (OverrideHotkey || SettingFieldDrawer.SettingKeyboardShortcut || evt.type != EventType.KeyDown || !MatchesShortcutEvent(evt)) return false;
+            if (_hotkeyGate.Press(Time.frameCount)) DisplayingWindow = !DisplayingWindow;
+            evt.Use();
+            return !DisplayingWindow;
+        }
+
+        private bool MatchesShortcutEvent(Event evt)
+        {
+            var shortcut = _keybind.Value;
+            if (shortcut.MainKey == KeyCode.None || evt.keyCode != shortcut.MainKey) return false;
+            var keys = shortcut.Modifiers.Concat(new[] { shortcut.MainKey }).ToArray();
+            var control = keys.Contains(KeyCode.LeftControl) || keys.Contains(KeyCode.RightControl);
+            var shift = keys.Contains(KeyCode.LeftShift) || keys.Contains(KeyCode.RightShift);
+            var alt = keys.Contains(KeyCode.LeftAlt) || keys.Contains(KeyCode.RightAlt);
+            var command = keys.Contains(KeyCode.LeftCommand) || keys.Contains(KeyCode.RightCommand);
+            if (evt.control != control || evt.shift != shift || evt.alt != alt || evt.command != command) return false;
+            return shortcut.Modifiers.All(key =>
+                key == KeyCode.LeftControl || key == KeyCode.RightControl ? evt.control :
+                key == KeyCode.LeftShift || key == KeyCode.RightShift ? evt.shift :
+                key == KeyCode.LeftAlt || key == KeyCode.RightAlt ? evt.alt :
+                key == KeyCode.LeftCommand || key == KeyCode.RightCommand ? evt.command : UnityInput.Current.GetKey(key));
         }
 
         private void SetUnlockCursor(int lockState, bool cursorVisible)
@@ -719,19 +794,8 @@ namespace ConfigurationManager
         {
             public BepInPlugin Info;
             public List<PluginSettingsGroupData> Categories;
-            public int Height;
             public string Website;
-
-            private bool _collapsed;
-            public bool Collapsed
-            {
-                get => _collapsed;
-                set
-                {
-                    _collapsed = value;
-                    Height = 0;
-                }
-            }
+            public bool Collapsed { get; set; }
 
             public sealed class PluginSettingsGroupData
             {

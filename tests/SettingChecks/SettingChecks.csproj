@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings>
+    <DefineConstants>$(DefineConstants);IL2CPP;SETTING_CHECKS</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../ManagedUiChecks/UnityFixture.cs" Link="UnityFixture.cs" />
+    <Compile Include="../ManagedUiChecks/HarmonyFixture.cs" Link="HarmonyFixture.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/SettingEntryBase.cs" Link="SettingEntryBase.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/PropertySettingEntry.cs" Link="PropertySettingEntry.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/ConfigSettingEntry.cs" Link="ConfigSettingEntry.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/SettingFieldDrawer.cs" Link="SettingFieldDrawer.cs" />
+    <Compile Include="../../ConfigurationManager.IL2CPP/SettingSearcher.cs" Link="SettingSearcher.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/Localization.cs" Link="Localization.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/Utilities/*.cs" Exclude="../../ConfigurationManager.Shared/Utilities/ImguiUtils.cs" Link="Utilities/%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

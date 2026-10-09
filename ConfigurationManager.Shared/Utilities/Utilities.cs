@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
@@ -39,7 +40,10 @@ namespace ConfigurationManager.Utilities
 
         public static string AppendZero(this string s)
         {
-            return !s.Contains(".") ? s + ".0" : s;
+            double number;
+            return !string.IsNullOrEmpty(s) && s.IndexOf('.') < 0 && s.IndexOf('e') < 0 && s.IndexOf('E') < 0 &&
+                   double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out number) &&
+                   !double.IsNaN(number) && !double.IsInfinity(number) ? s + ".0" : s;
         }
 
         public static string AppendZeroIfFloat(this string s, Type type)

@@ -9,6 +9,9 @@ on:
 jobs:
   build:
 
+    # Fork releases distribute plugin archives; only upstream publishes to its NuGet feed.
+    if: github.repository == 'BepInEx/BepInEx.ConfigurationManager'
+
     runs-on: windows-latest
 
     steps:

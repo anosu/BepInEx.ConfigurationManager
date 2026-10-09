@@ -35,6 +35,10 @@
       <Link>README.md</Link>
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
+    <None Include="..\CHANGELOG.md">
+      <Link>CHANGELOG.md</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
     <None Include="..\ConfigurationManagerAttributes.cs">
       <Link>ConfigurationManagerAttributes.cs</Link>
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
@@ -57,11 +61,6 @@
       <IncludeAssets>compile</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-  </ItemGroup>
-
-  <ItemGroup>
-    <Analyzer Include="..\packages\BepInEx.Analyzers.1.0.8\analyzers\dotnet\cs\BepInEx.Analyzers.CodeFixes.dll" />
-    <Analyzer Include="..\packages\BepInEx.Analyzers.1.0.8\analyzers\dotnet\cs\BepInEx.Analyzers.dll" />
   </ItemGroup>
 
   <Import Project="..\ConfigurationManager.Shared\ConfigurationManager.Shared.projitems" Label="Shared" />

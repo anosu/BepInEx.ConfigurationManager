@@ -9,12 +9,14 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using BepInEx;
-#if IL2CPP
-using BepInEx.Unity.IL2CPP.Configuration;
-#else
 using BepInEx.Configuration;
-#endif
 using UnityEngine;
+#if IL2CPP
+using UnityInput = BepInEx.Configuration.CompatibleUnityInput;
+using GUILayout = ConfigurationManager.Utilities.ManagedLayout;
+using GUILayoutUtility = ConfigurationManager.Utilities.ManagedLayout;
+using GUILayoutOption = ConfigurationManager.Utilities.LayoutOption;
+#endif
 
 namespace ConfigurationManager
 {
@@ -29,16 +31,31 @@ namespace ConfigurationManager
         private static ConfigurationManager _instance;
 
         private static SettingEntryBase _currentKeyboardShortcutToSet;
+        private static bool _keyboardShortcutWasDrawn;
         public static bool SettingKeyboardShortcut => _currentKeyboardShortcutToSet != null;
+
+        internal static void BeginFrame()
+        {
+            _keyboardShortcutWasDrawn = false;
+            ComboBox.BeginFrame();
+        }
+        internal static void EndFrame()
+        {
+            if (!_keyboardShortcutWasDrawn) CancelKeyboardShortcut();
+            ComboBox.EndFrame();
+        }
+        private static void CancelKeyboardShortcut()
+        {
+            if (_currentKeyboardShortcutToSet == null) return;
+            _currentKeyboardShortcutToSet = null;
+            if (GUIUtility.keyboardControl == -1) GUIUtility.keyboardControl = 0;
+        }
 
         static SettingFieldDrawer()
         {
             SettingDrawHandlers = new Dictionary<Type, Action<SettingEntryBase>>
             {
                 { typeof(bool), DrawBoolField },
-#if IL2CPP
-                { typeof(BepInEx.Configuration.KeyboardShortcut), DrawKeyboardShortcutObsolete},
-#endif
                 { typeof(KeyboardShortcut), DrawKeyboardShortcut},
                 { typeof(KeyCode), DrawKeyCode },
                 { typeof(Color), DrawColor },
@@ -56,6 +73,7 @@ namespace ConfigurationManager
 
         public void DrawSettingValue(SettingEntryBase setting)
         {
+#if !IL2CPP
             if (setting.CustomDrawer != null)
                 setting.CustomDrawer(setting is ConfigSettingEntry newSetting ? newSetting.Entry : null);
             else if (setting.CustomHotkeyDrawer != null)
@@ -66,9 +84,15 @@ namespace ConfigurationManager
                 setting.CustomHotkeyDrawer(setting is ConfigSettingEntry newSetting ? newSetting.Entry : null, ref isBeingSet);
 
                 if (isBeingSet != isBeingSetOriginal)
-                    _currentKeyboardShortcutToSet = isBeingSet ? setting : null;
+                {
+                    if (isBeingSet) _currentKeyboardShortcutToSet = setting;
+                    else CancelKeyboardShortcut();
+                }
+                if (isBeingSet) _keyboardShortcutWasDrawn = true;
             }
-            else if (setting.ShowRangeAsPercent != null && setting.AcceptableValueRange.Key != null)
+            else
+#endif
+            if (setting.ShowRangeAsPercent != null && setting.AcceptableValueRange.Key != null)
                 DrawRangeField(setting);
             else if (setting.AcceptableValues != null)
                 DrawListField(setting);
@@ -84,6 +108,8 @@ namespace ConfigurationManager
         public static void ClearCache()
         {
             _comboBoxCache.Clear();
+            CancelKeyboardShortcut();
+            ComboBox.Close();
 
             foreach (var tex in _colorCache)
                 UnityEngine.Object.Destroy(tex.Value.Tex);
@@ -93,9 +119,9 @@ namespace ConfigurationManager
         public static void DrawCenteredLabel(string text, params GUILayoutOption[] options)
         {
             GUILayout.BeginHorizontal(options);
-            GUILayout.FlexibleSpace();
+            ImguiCompatibility.FlexibleSpace();
             GUILayout.Label(text);
-            GUILayout.FlexibleSpace();
+            ImguiCompatibility.FlexibleSpace();
             GUILayout.EndHorizontal();
         }
 
@@ -105,10 +131,11 @@ namespace ConfigurationManager
             if (_categoryHeaderSkin == null)
             {
                 _categoryHeaderSkin = GUI.skin.label.CreateCopy();
-                _categoryHeaderSkin.alignment = TextAnchor.UpperCenter;
+                _categoryHeaderSkin.alignment = TextAnchor.MiddleLeft;
                 _categoryHeaderSkin.wordWrap = true;
                 _categoryHeaderSkin.stretchWidth = true;
-                _categoryHeaderSkin.fontSize = 14;
+                _categoryHeaderSkin.fontSize = 16;
+                _categoryHeaderSkin.normal.textColor = ModernSkin.Accent;
             }
 
             GUILayout.Label(text, _categoryHeaderSkin);
@@ -120,25 +147,24 @@ namespace ConfigurationManager
             if (_pluginHeaderSkin == null)
             {
                 _pluginHeaderSkin = GUI.skin.label.CreateCopy();
-                _pluginHeaderSkin.alignment = TextAnchor.UpperCenter;
+                _pluginHeaderSkin.alignment = TextAnchor.MiddleLeft;
                 _pluginHeaderSkin.wordWrap = true;
                 _pluginHeaderSkin.stretchWidth = true;
-                _pluginHeaderSkin.fontSize = 15;
+                _pluginHeaderSkin.fontSize = 18;
+                _pluginHeaderSkin.padding = ModernSkin.Offset(4, 4, 8, 8);
             }
 
-            if (isCollapsed) content.text += "\n...";
-            return GUILayout.Button(content, _pluginHeaderSkin, GUILayout.ExpandWidth(true));
+            content.text = (isCollapsed ? "+  " : "−  ") + content.text;
+            return GUILayout.Button(content, _pluginHeaderSkin, ImguiCompatibility.ExpandWidth(true));
         }
 
         public static bool DrawCurrentDropdown()
         {
-            if (ComboBox.CurrentDropdownDrawer != null)
-            {
-                ComboBox.CurrentDropdownDrawer.Invoke();
-                ComboBox.CurrentDropdownDrawer = null;
-                return true;
-            }
-            return false;
+            var draw = ComboBox.CurrentDropdownDrawer;
+            ComboBox.CurrentDropdownDrawer = null;
+            if (draw == null) return false;
+            draw();
+            return true;
         }
 
         private static void DrawListField(SettingEntryBase setting)
@@ -160,16 +186,32 @@ namespace ConfigurationManager
         {
             if (SettingDrawHandlers.TryGetValue(setting.SettingType, out var drawMethod))
             {
+#if IL2CPP
+                // External GUILayout drawers cannot share the managed layout tree safely.
+                if (drawMethod.Method.DeclaringType != typeof(SettingFieldDrawer)) return false;
+#endif
                 drawMethod(setting);
+                return true;
+            }
+            if (IsKeyboardShortcut(setting.SettingType))
+            {
+                DrawKeyboardShortcut(setting);
                 return true;
             }
             return false;
         }
 
+        internal static bool IsKeyboardShortcut(Type type)
+        {
+            return type == typeof(KeyboardShortcut) ||
+                   (type.FullName == "BepInEx.Unity.IL2CPP.Configuration.KeyboardShortcut" &&
+                    type.GetConstructor(new[] { typeof(KeyCode), typeof(KeyCode[]) }) != null);
+        }
+
         private static void DrawBoolField(SettingEntryBase setting)
         {
             var boolVal = (bool)setting.Get();
-            var result = GUILayout.Toggle(boolVal, boolVal ? "Enabled" : "Disabled", GUILayout.ExpandWidth(true));
+            var result = GUILayout.Toggle(boolVal, boolVal ? Localization.Text("Enabled") : Localization.Text("Disabled"), ImguiCompatibility.ExpandWidth(true));
             if (result != boolVal)
                 setting.Set(result);
         }
@@ -188,7 +230,7 @@ namespace ConfigurationManager
             var allValues = enumValues.Cast<Enum>().Select(x => new { name = x.ToString(), val = Convert.ToInt64(x) }).ToArray();
 
             // Vertically stack Horizontal groups of the options to deal with the options taking more width than is available in the window
-            GUILayout.BeginVertical(GUILayout.MaxWidth(maxWidth));
+            GUILayout.BeginVertical(ImguiCompatibility.MaxWidth(maxWidth));
             {
                 for (var index = 0; index < allValues.Length;)
                 {
@@ -205,12 +247,12 @@ namespace ConfigurationManager
                                 // Make sure this horizontal group doesn't extend over window width, if it does then start a new horiz group below
                                 var textDimension = (int)GUI.skin.toggle.CalcSize(new GUIContent(value.name)).x;
                                 currentWidth += textDimension;
-                                if (currentWidth > maxWidth)
+                                if (currentWidth > maxWidth && currentWidth != textDimension)
                                     break;
 
                                 GUI.changed = false;
                                 var newVal = GUILayout.Toggle((currentValue & value.val) == value.val, value.name,
-                                    GUILayout.ExpandWidth(false));
+                                    ImguiCompatibility.ExpandWidth(false));
                                 if (GUI.changed)
                                 {
                                     var newValue = newVal ? currentValue | value.val : currentValue & ~value.val;
@@ -226,13 +268,13 @@ namespace ConfigurationManager
             }
             GUILayout.EndVertical();
             // Make sure the reset button is properly spaced
-            GUILayout.FlexibleSpace();
+            ImguiCompatibility.FlexibleSpace();
         }
 
         private static void DrawComboboxField(SettingEntryBase setting, IList list, float windowYmax)
         {
             var buttonText = ObjectToGuiContent(setting.Get());
-            var dispRect = GUILayoutUtility.GetRect(buttonText, GUI.skin.button, GUILayout.ExpandWidth(true));
+            var dispRect = GUILayoutUtility.GetRect(buttonText, GUI.skin.button, ImguiCompatibility.ExpandWidth(true));
 
             if (!_comboBoxCache.TryGetValue(setting, out var box))
             {
@@ -245,6 +287,7 @@ namespace ConfigurationManager
                 box.ButtonContent = buttonText;
             }
 
+            box.Bounds = _instance.SettingWindowRect;
             box.Show(id =>
             {
                 if (id >= 0 && id < list.Count)
@@ -273,10 +316,10 @@ namespace ConfigurationManager
             var leftValue = (float)Convert.ToDouble(setting.AcceptableValueRange.Key, CultureInfo.InvariantCulture);
             var rightValue = (float)Convert.ToDouble(setting.AcceptableValueRange.Value, CultureInfo.InvariantCulture);
 
-            var result = GUILayout.HorizontalSlider(converted, leftValue, rightValue, GUILayout.ExpandWidth(true));
+            var result = ImguiCompatibility.HorizontalSlider(converted, leftValue, rightValue, ImguiCompatibility.ExpandWidth(true));
             if (Math.Abs(result - converted) > Mathf.Abs(rightValue - leftValue) / 1000)
             {
-                var newValue = Convert.ChangeType(result, setting.SettingType, CultureInfo.InvariantCulture);
+                var newValue = RangeValue.FromSlider(result, setting.SettingType, setting.AcceptableValueRange.Key, setting.AcceptableValueRange.Value);
                 setting.Set(newValue);
             }
 
@@ -284,25 +327,23 @@ namespace ConfigurationManager
             {
                 DrawCenteredLabel(
                     Mathf.Round(100 * Mathf.Abs(result - leftValue) / Mathf.Abs(rightValue - leftValue)) + "%",
-                    GUILayout.Width(50));
+                    ImguiCompatibility.Width(72));
             }
             else
             {
                 var strVal = Convert.ToString(value, CultureInfo.InvariantCulture).AppendZeroIfFloat(setting.SettingType);
-                var strResult = GUILayout.TextField(strVal, GUILayout.Width(50));
-                if (strResult != strVal)
+                ImguiCompatibility.EditValue(strVal, strResult =>
                 {
                     try
                     {
-                        var resultVal = (float)Convert.ToDouble(strResult, CultureInfo.InvariantCulture);
-                        var clampedResultVal = Mathf.Clamp(resultVal, leftValue, rightValue);
-                        setting.Set(Convert.ChangeType(clampedResultVal, setting.SettingType, CultureInfo.InvariantCulture));
+                        setting.Set(RangeValue.Parse(strResult, setting.SettingType, setting.AcceptableValueRange.Key, setting.AcceptableValueRange.Value));
                     }
                     catch (FormatException)
                     {
                         // Ignore user typing in bad data
                     }
-                }
+                    catch (OverflowException) { }
+                }, ImguiCompatibility.Width(88));
             }
         }
 
@@ -312,10 +353,13 @@ namespace ConfigurationManager
             if (setting.ObjToStr != null && setting.StrToObj != null)
             {
                 var text = setting.ObjToStr(setting.Get()).AppendZeroIfFloat(setting.SettingType);
-                var result = GUILayout.TextField(text, GUILayout.Width(rightColumnWidth), GUILayout.MaxWidth(rightColumnWidth));
-
-                if (result != text)
-                    setting.Set(setting.StrToObj(result));
+                ImguiCompatibility.EditValue(text, result =>
+                {
+                    try { setting.Set(setting.StrToObj(result)); }
+                    catch (FormatException) { }
+                    catch (OverflowException) { }
+                    catch (ArgumentException) { }
+                }, ImguiCompatibility.ExpandWidth(true));
             }
             else
             {
@@ -324,18 +368,19 @@ namespace ConfigurationManager
                 var value = rawValue == null ? "NULL" : Convert.ToString(rawValue, CultureInfo.InvariantCulture).AppendZeroIfFloat(setting.SettingType);
                 if (CanCovert(value, setting.SettingType))
                 {
-                    var result = GUILayout.TextField(value, GUILayout.Width(rightColumnWidth), GUILayout.MaxWidth(rightColumnWidth));
-                    if (result != value)
-                        setting.Set(Convert.ChangeType(result, setting.SettingType, CultureInfo.InvariantCulture));
+                    ImguiCompatibility.EditValue(value, result =>
+                    {
+                        try { setting.Set(Convert.ChangeType(result, setting.SettingType, CultureInfo.InvariantCulture)); }
+                        catch (FormatException) { }
+                        catch (OverflowException) { }
+                    }, ImguiCompatibility.ExpandWidth(true));
                 }
                 else
                 {
-                    GUILayout.TextArea(value, GUILayout.MaxWidth(rightColumnWidth));
+                    GUILayout.Label(value, ImguiCompatibility.ExpandWidth(true));
                 }
             }
 
-            // When using MaxWidth the width will always be less than full window size, use this to fill this gap and push the Reset button to the right edge
-            GUILayout.FlexibleSpace();
         }
 
         private readonly Dictionary<Type, bool> _canCovertCache = new Dictionary<Type, bool>();
@@ -361,7 +406,7 @@ namespace ConfigurationManager
         {
             if (ReferenceEquals(_currentKeyboardShortcutToSet, setting))
             {
-                GUILayout.Label("Press any key", GUILayout.ExpandWidth(true));
+                GUILayout.Label(Localization.Text("Press any key"), ImguiCompatibility.ExpandWidth(true));
                 GUIUtility.keyboardControl = -1;
 
                 var input = UnityInput.Current;
@@ -371,28 +416,29 @@ namespace ConfigurationManager
                     if (input.GetKeyUp(key))
                     {
                         setting.Set(key);
-                        _currentKeyboardShortcutToSet = null;
+                        CancelKeyboardShortcut();
                         break;
                     }
                 }
-                if (GUILayout.Button("Cancel", GUILayout.ExpandWidth(false)))
-                    _currentKeyboardShortcutToSet = null;
+                if (GUILayout.Button(Localization.Text("Cancel"), ImguiCompatibility.ExpandWidth(false)))
+                    CancelKeyboardShortcut();
             }
             else
             {
                 var acceptableValues = setting.AcceptableValues?.Length > 1 ? setting.AcceptableValues : Enum.GetValues(setting.SettingType);
                 DrawComboboxField(setting, acceptableValues, _instance.SettingWindowRect.yMax);
 
-                if (GUILayout.Button(new GUIContent("Set...", null, "Set the key by pressing any key on your keyboard."), GUILayout.ExpandWidth(false)))
+                if (GUILayout.Button(new GUIContent(Localization.Text("Set..."), null, Localization.Text("Set the key by pressing any key on your keyboard.")), ImguiCompatibility.ExpandWidth(false)))
                     _currentKeyboardShortcutToSet = setting;
             }
+            if (ReferenceEquals(_currentKeyboardShortcutToSet, setting)) _keyboardShortcutWasDrawn = true;
         }
 
         private static void DrawKeyboardShortcut(SettingEntryBase setting)
         {
             if (ReferenceEquals(_currentKeyboardShortcutToSet, setting))
             {
-                GUILayout.Label("Press any key combination", GUILayout.ExpandWidth(true));
+                GUILayout.Label(Localization.Text("Press any key combination"), ImguiCompatibility.ExpandWidth(true));
                 GUIUtility.keyboardControl = -1;
 
                 var input = UnityInput.Current;
@@ -401,109 +447,69 @@ namespace ConfigurationManager
                 {
                     if (input.GetKeyUp(key))
                     {
-                        setting.Set(new KeyboardShortcut(key, _keysToCheck.Where(input.GetKey).ToArray()));
-                        _currentKeyboardShortcutToSet = null;
+                        setting.Set(Activator.CreateInstance(setting.SettingType, new object[] { key, _keysToCheck.Where(input.GetKey).ToArray() }));
+                        CancelKeyboardShortcut();
                         break;
                     }
                 }
-                if (GUILayout.Button("Cancel", GUILayout.ExpandWidth(false)))
-                    _currentKeyboardShortcutToSet = null;
+                if (GUILayout.Button(Localization.Text("Cancel"), ImguiCompatibility.ExpandWidth(false)))
+                    CancelKeyboardShortcut();
             }
             else
             {
-                if (GUILayout.Button(setting.Get().ToString(), GUILayout.ExpandWidth(true)))
+                if (GUILayout.Button(Localization.Text(setting.Get().ToString()), ImguiCompatibility.ExpandWidth(true)))
                     _currentKeyboardShortcutToSet = setting;
 
-                if (GUILayout.Button("Clear", GUILayout.ExpandWidth(false)))
+                if (GUILayout.Button(Localization.Text("Clear"), ImguiCompatibility.ExpandWidth(false)))
                 {
-                    setting.Set(KeyboardShortcut.Empty);
-                    _currentKeyboardShortcutToSet = null;
+                    setting.Set(Activator.CreateInstance(setting.SettingType));
+                    CancelKeyboardShortcut();
                 }
             }
+            if (ReferenceEquals(_currentKeyboardShortcutToSet, setting)) _keyboardShortcutWasDrawn = true;
         }
 
-#if IL2CPP
-        private static void DrawKeyboardShortcutObsolete(SettingEntryBase setting)
-        {
-            if (ReferenceEquals(_currentKeyboardShortcutToSet, setting))
-            {
-                GUILayout.Label("Press any key combination", GUILayout.ExpandWidth(true));
-                GUIUtility.keyboardControl = -1;
-
-                var input = UnityInput.Current;
-                if (_keysToCheck == null) _keysToCheck = input.SupportedKeyCodes.Except(new[] { KeyCode.Mouse0, KeyCode.None }).ToArray();
-                foreach (var key in _keysToCheck)
-                {
-                    if (input.GetKeyUp(key))
-                    {
-                        setting.Set(new BepInEx.Configuration.KeyboardShortcut(key, _keysToCheck.Where(input.GetKey).ToArray()));
-                        _currentKeyboardShortcutToSet = null;
-                        break;
-                    }
-                }
-                if (GUILayout.Button("Cancel", GUILayout.ExpandWidth(false)))
-                    _currentKeyboardShortcutToSet = null;
-            }
-            else
-            {
-                if (GUILayout.Button(setting.Get().ToString(), GUILayout.ExpandWidth(true)))
-                    _currentKeyboardShortcutToSet = setting;
-
-                if (GUILayout.Button("Clear", GUILayout.ExpandWidth(false)))
-                {
-                    setting.Set(BepInEx.Configuration.KeyboardShortcut.Empty);
-                    _currentKeyboardShortcutToSet = null;
-                }
-            }
-        }
-#endif
 
         private static void DrawVector2(SettingEntryBase obj)
         {
             var setting = (Vector2)obj.Get();
-            var copy = setting;
-            setting.x = DrawSingleVectorSlider(setting.x, "X");
-            setting.y = DrawSingleVectorSlider(setting.y, "Y");
-            if (setting != copy) obj.Set(setting);
+            DrawSingleVectorSlider(setting.x, "X", value => { var current = (Vector2)obj.Get(); current.x = value; obj.Set(current); });
+            DrawSingleVectorSlider(setting.y, "Y", value => { var current = (Vector2)obj.Get(); current.y = value; obj.Set(current); });
         }
 
         private static void DrawVector3(SettingEntryBase obj)
         {
             var setting = (Vector3)obj.Get();
-            var copy = setting;
-            setting.x = DrawSingleVectorSlider(setting.x, "X");
-            setting.y = DrawSingleVectorSlider(setting.y, "Y");
-            setting.z = DrawSingleVectorSlider(setting.z, "Z");
-            if (setting != copy) obj.Set(setting);
+            DrawSingleVectorSlider(setting.x, "X", value => { var current = (Vector3)obj.Get(); current.x = value; obj.Set(current); });
+            DrawSingleVectorSlider(setting.y, "Y", value => { var current = (Vector3)obj.Get(); current.y = value; obj.Set(current); });
+            DrawSingleVectorSlider(setting.z, "Z", value => { var current = (Vector3)obj.Get(); current.z = value; obj.Set(current); });
         }
 
         private static void DrawVector4(SettingEntryBase obj)
         {
             var setting = (Vector4)obj.Get();
-            var copy = setting;
-            setting.x = DrawSingleVectorSlider(setting.x, "X");
-            setting.y = DrawSingleVectorSlider(setting.y, "Y");
-            setting.z = DrawSingleVectorSlider(setting.z, "Z");
-            setting.w = DrawSingleVectorSlider(setting.w, "W");
-            if (setting != copy) obj.Set(setting);
+            DrawSingleVectorSlider(setting.x, "X", value => { var current = (Vector4)obj.Get(); current.x = value; obj.Set(current); });
+            DrawSingleVectorSlider(setting.y, "Y", value => { var current = (Vector4)obj.Get(); current.y = value; obj.Set(current); });
+            DrawSingleVectorSlider(setting.z, "Z", value => { var current = (Vector4)obj.Get(); current.z = value; obj.Set(current); });
+            DrawSingleVectorSlider(setting.w, "W", value => { var current = (Vector4)obj.Get(); current.w = value; obj.Set(current); });
         }
 
         private static void DrawQuaternion(SettingEntryBase obj)
         {
             var setting = (Quaternion)obj.Get();
-            var copy = setting;
-            setting.x = DrawSingleVectorSlider(setting.x, "X");
-            setting.y = DrawSingleVectorSlider(setting.y, "Y");
-            setting.z = DrawSingleVectorSlider(setting.z, "Z");
-            setting.w = DrawSingleVectorSlider(setting.w, "W");
-            if (setting != copy) obj.Set(setting);
+            DrawSingleVectorSlider(setting.x, "X", value => { var current = (Quaternion)obj.Get(); current.x = value; obj.Set(current); });
+            DrawSingleVectorSlider(setting.y, "Y", value => { var current = (Quaternion)obj.Get(); current.y = value; obj.Set(current); });
+            DrawSingleVectorSlider(setting.z, "Z", value => { var current = (Quaternion)obj.Get(); current.z = value; obj.Set(current); });
+            DrawSingleVectorSlider(setting.w, "W", value => { var current = (Quaternion)obj.Get(); current.w = value; obj.Set(current); });
         }
 
-        private static float DrawSingleVectorSlider(float setting, string label)
+        private static void DrawSingleVectorSlider(float setting, string label, Action<float> commit)
         {
-            GUILayout.Label(label, GUILayout.ExpandWidth(false));
-            float.TryParse(GUILayout.TextField(setting.ToString("F", CultureInfo.InvariantCulture), GUILayout.ExpandWidth(true)), NumberStyles.Any, CultureInfo.InvariantCulture, out var x);
-            return x;
+            GUILayout.Label(label, ImguiCompatibility.ExpandWidth(false));
+            ImguiCompatibility.EditValue(setting.ToString("G", CultureInfo.InvariantCulture), text =>
+            {
+                if (float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) commit(value);
+            }, ImguiCompatibility.ExpandWidth(true));
         }
 
         private static bool _drawColorHex;
@@ -525,38 +531,38 @@ namespace ConfigurationManager
             {
                 GUILayout.BeginHorizontal();
                 {
-                    GUILayout.Label(cacheEntry.Tex, GUILayout.ExpandWidth(false));
+                    GUILayout.Label(cacheEntry.Tex, ImguiCompatibility.ExpandWidth(false));
 
-                    var colorStr = _drawColorHex ? "#" + ColorUtility.ToHtmlStringRGBA(colorValue) : $"{colorValue.r:F2} {colorValue.g:F2} {colorValue.b:F2} {colorValue.a:F2}";
-                    var newColorStr = GUILayout.TextField(colorStr, GUILayout.ExpandWidth(true));
-                    if (GUI.changed && colorStr != newColorStr)
+                    var colorStr = _drawColorHex ? "#" + ImguiCompatibility.ColorToHex(colorValue) : $"{colorValue.r:F2} {colorValue.g:F2} {colorValue.b:F2} {colorValue.a:F2}";
+                    var hexMode = _drawColorHex;
+                    ImguiCompatibility.EditValue(colorStr, newColorStr =>
                     {
-                        if (_drawColorHex)
+                        if (hexMode)
                         {
                             if (ColorUtility.TryParseHtmlString(newColorStr, out var parsedColor))
-                                colorValue = parsedColor;
+                            { colorValue = parsedColor; obj.Set(colorValue); }
                         }
                         else
                         {
                             var split = newColorStr.Split(' ');
                             if (split.Length == 4 && float.TryParse(split[0], out var r) && float.TryParse(split[1], out var g) && float.TryParse(split[2], out var b) && float.TryParse(split[3], out var a))
-                                colorValue = new Color(r, g, b, a);
+                            { colorValue = new Color(r, g, b, a); obj.Set(colorValue); }
                         }
-                    }
+                    }, ImguiCompatibility.ExpandWidth(true));
 
-                    _drawColorHex = GUILayout.Toggle(_drawColorHex, "Hex", GUILayout.ExpandWidth(false));
+                    _drawColorHex = GUILayout.Toggle(_drawColorHex, Localization.Text("Hex"), ImguiCompatibility.ExpandWidth(false));
                 }
                 GUILayout.EndHorizontal();
                 GUILayout.BeginHorizontal();
                 {
-                    GUILayout.Label("R", GUILayout.ExpandWidth(false));
-                    colorValue.r = GUILayout.HorizontalSlider(colorValue.r, 0f, 1f, GUILayout.ExpandWidth(true));
-                    GUILayout.Label("G", GUILayout.ExpandWidth(false));
-                    colorValue.g = GUILayout.HorizontalSlider(colorValue.g, 0f, 1f, GUILayout.ExpandWidth(true));
-                    GUILayout.Label("B", GUILayout.ExpandWidth(false));
-                    colorValue.b = GUILayout.HorizontalSlider(colorValue.b, 0f, 1f, GUILayout.ExpandWidth(true));
-                    GUILayout.Label("A", GUILayout.ExpandWidth(false));
-                    colorValue.a = GUILayout.HorizontalSlider(colorValue.a, 0f, 1f, GUILayout.ExpandWidth(true));
+                    GUILayout.Label("R", ImguiCompatibility.ExpandWidth(false));
+                    colorValue.r = ImguiCompatibility.HorizontalSlider(colorValue.r, 0f, 1f, ImguiCompatibility.ExpandWidth(true));
+                    GUILayout.Label("G", ImguiCompatibility.ExpandWidth(false));
+                    colorValue.g = ImguiCompatibility.HorizontalSlider(colorValue.g, 0f, 1f, ImguiCompatibility.ExpandWidth(true));
+                    GUILayout.Label("B", ImguiCompatibility.ExpandWidth(false));
+                    colorValue.b = ImguiCompatibility.HorizontalSlider(colorValue.b, 0f, 1f, ImguiCompatibility.ExpandWidth(true));
+                    GUILayout.Label("A", ImguiCompatibility.ExpandWidth(false));
+                    colorValue.a = ImguiCompatibility.HorizontalSlider(colorValue.a, 0f, 1f, ImguiCompatibility.ExpandWidth(true));
                 }
                 GUILayout.EndHorizontal();
             }
@@ -564,7 +570,7 @@ namespace ConfigurationManager
 
             if (colorValue != cacheEntry.Last)
             {
-                obj.Set(colorValue);
+                if (colorValue != (Color)obj.Get()) obj.Set(colorValue);
                 FillTex(colorValue, cacheEntry.Tex);
                 cacheEntry.Last = colorValue;
             }

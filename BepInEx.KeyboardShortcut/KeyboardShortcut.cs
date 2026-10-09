@@ -21,7 +21,6 @@ namespace BepInEx.Configuration
     ///
     /// How to use: Use <see cref="IsDown"/> in this class instead of <see cref="Input.GetKeyDown(KeyCode)"/> in the Update loop.
     /// </summary>
-    [Obsolete("Update to BepInEx.Unity.IL2CPP 6.0.0-be.785 and use Unity.IL2CPP.Configuration.KeyboardShortcut instead")]
     public struct KeyboardShortcut
     {
         static KeyboardShortcut()
@@ -46,6 +45,7 @@ namespace BepInEx.Configuration
         public static readonly IEnumerable<KeyCode> AllKeyCodes = Enum.GetValues(typeof(KeyCode)) as KeyCode[];
 
         // Don't block hotkeys if mouse is being pressed, e.g. when shooting and trying to strafe
+        /// <summary>Keys that block a shortcut unless included in its combination.</summary>
         public static readonly KeyCode[] ModifierBlockKeyCodes = AllKeyCodes.Except(new KeyCode[] {
             KeyCode.Mouse0, KeyCode.Mouse1, KeyCode.Mouse2, KeyCode.Mouse3,
             KeyCode.Mouse4, KeyCode.Mouse5, KeyCode.Mouse6, KeyCode.None }).ToArray();
@@ -130,7 +130,7 @@ namespace BepInEx.Configuration
         public bool IsDown()
         {
             KeyCode mainKey = MainKey;
-            return mainKey != KeyCode.None && UnityInput.Current.GetKeyDown(mainKey) && ModifierKeyTest();
+            return mainKey != KeyCode.None && CompatibleUnityInput.Current.GetKeyDown(mainKey) && ModifierKeyTest();
         }
 
         /// <summary>
@@ -139,7 +139,7 @@ namespace BepInEx.Configuration
         public bool IsPressed()
         {
             KeyCode mainKey = MainKey;
-            return mainKey != KeyCode.None && UnityInput.Current.GetKey(mainKey) && ModifierKeyTest();
+            return mainKey != KeyCode.None && CompatibleUnityInput.Current.GetKey(mainKey) && ModifierKeyTest();
         }
 
         /// <summary>
@@ -148,15 +148,15 @@ namespace BepInEx.Configuration
         public bool IsUp()
         {
             KeyCode mainKey = MainKey;
-            return mainKey != KeyCode.None && UnityInput.Current.GetKeyUp(mainKey) && ModifierKeyTest();
+            return mainKey != KeyCode.None && CompatibleUnityInput.Current.GetKeyUp(mainKey) && ModifierKeyTest();
         }
 
         private bool ModifierKeyTest()
         {
             KeyCode mainKey = MainKey;
             return
-                _allKeys.All(key => key == mainKey || UnityInput.Current.GetKey(key)) &&
-                ModifierBlockKeyCodes.Except(_allKeys).All(key => !UnityInput.Current.GetKey(key));
+                _allKeys.All(key => key == mainKey || CompatibleUnityInput.Current.GetKey(key)) &&
+                ModifierBlockKeyCodes.Except(_allKeys).All(key => !CompatibleUnityInput.Current.GetKey(key));
         }
 
         /// <inheritdoc />

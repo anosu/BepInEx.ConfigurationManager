@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <DefineConstants Condition="'$(UseModernApi)' == 'true'">$(DefineConstants);MODERN</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../BepInEx.KeyboardShortcut/CompatibleUnityInput.cs" Link="CompatibleUnityInput.cs" />
+  </ItemGroup>
+</Project>

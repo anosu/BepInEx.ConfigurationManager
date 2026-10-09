@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <DefineConstants>$(DefineConstants);IL2CPP</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../ConfigurationManager.Shared/Utilities/LayoutTree.cs" Link="LayoutTree.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/Utilities/ManagedLayout.cs" Link="ManagedLayout.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/Utilities/ImguiCompatibility.cs" Link="ImguiCompatibility.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/Utilities/TextEditState.cs" Link="TextEditState.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/Utilities/ScrollMath.cs" Link="ScrollMath.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/Utilities/HoverState.cs" Link="HoverState.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/Utilities/ComboBox.cs" Link="ComboBox.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/Utilities/ModernSkin.cs" Link="ModernSkin.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/Utilities/HotkeyGate.cs" Link="HotkeyGate.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/Utilities/ModalInput.cs" Link="ModalInput.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/Utilities/PluginCollapseState.cs" Link="PluginCollapseState.cs" />
+  </ItemGroup>
+</Project>

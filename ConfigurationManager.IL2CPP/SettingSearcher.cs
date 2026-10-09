@@ -29,7 +29,7 @@ namespace ConfigurationManager
             modsWithoutSettings = new List<string>();
             try
             {
-                results = GetBepInExCoreConfig();
+                results = GetBepInExCoreConfig().ToList();
             }
             catch (Exception ex)
             {
@@ -39,52 +39,61 @@ namespace ConfigurationManager
 
             foreach (var plugin in FindPlugins())
             {
-                var type = plugin.Instance.GetType();
-
-                bool advanced = false;
-                if (type.GetCustomAttributes(typeof(BrowsableAttribute), false).Cast<BrowsableAttribute>()
-                    .Any(x => !x.Browsable))
+                try
                 {
-                    var metadata = plugin.Metadata;
+                    var type = plugin.Instance.GetType();
 
-                    if (metadata.GUID != ConfigurationManager.GUID)
+                    bool advanced = false;
+                    if (type.GetCustomAttributes(typeof(BrowsableAttribute), false).Cast<BrowsableAttribute>()
+                        .Any(x => !x.Browsable))
                     {
-                        modsWithoutSettings.Add(metadata.Name);
-                        continue;
-                    }
-                    advanced = true;
-                }
+                        var metadata = plugin.Metadata;
 
-                var detected = GetPluginConfig(plugin).Cast<SettingEntryBase>().ToList();
-
-                detected.RemoveAll(x => x.Browsable == false);
-
-                if (detected.Count == 0 || advanced)
-                    detected.ForEach(x => x.IsAdvanced = true);
-
-                // Allow to enable/disable plugin if it uses any update methods ------
-                if (showDebug)
-                {
-                    var pluginAssembly = type.Assembly;
-                    var behaviours = UnityEngine.Object.FindObjectsOfType<MonoBehaviour>()
-                        .Where(behaviour => behaviour.GetType().Assembly == pluginAssembly);
-                    foreach (var behaviour in behaviours)
-                    {
-                        var behaviourType = behaviour.GetType();
-                        if (!behaviourType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Any(m => _updateMethodNames.Contains(m.Name)))
+                        if (metadata.GUID != ConfigurationManager.GUID)
+                        {
+                            modsWithoutSettings.Add(metadata.Name);
                             continue;
-                        PropertyInfo property = behaviourType.GetProperty(nameof(MonoBehaviour.enabled));
-                        PropertySettingEntry enabledSetting = new PropertySettingEntry(behaviour, property, plugin);
-                        enabledSetting.DispName = "!Allow plugin to run on every frame";
-                        enabledSetting.Description = "Disabling this will disable some or all of the plugin's functionality.\nHooks and event-based functionality will not be disabled.\nThis setting will be lost after game restart.";
-                        enabledSetting.IsAdvanced = true;
-                        detected.Add(enabledSetting);
-                        break;
+                        }
+                        advanced = true;
                     }
-                }
 
-                if (detected.Count > 0)
-                    results = results.Concat(detected);
+                    var detected = GetPluginConfig(plugin).Cast<SettingEntryBase>().ToList();
+
+                    detected.RemoveAll(x => x.Browsable == false);
+
+                    if (detected.Count == 0) modsWithoutSettings.Add(plugin.Metadata.Name);
+                    if (advanced)
+                        detected.ForEach(x => x.IsAdvanced = true);
+
+                    // Allow to enable/disable plugin if it uses any update methods ------
+                    if (showDebug)
+                    {
+                        var pluginAssembly = type.Assembly;
+                        var behaviours = UnityEngine.Object.FindObjectsOfType<MonoBehaviour>()
+                            .Where(behaviour => behaviour.GetType().Assembly == pluginAssembly);
+                        foreach (var behaviour in behaviours)
+                        {
+                            var behaviourType = behaviour.GetType();
+                            if (!behaviourType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Any(m => _updateMethodNames.Contains(m.Name)))
+                                continue;
+                            PropertyInfo property = behaviourType.GetProperty(nameof(MonoBehaviour.enabled));
+                            PropertySettingEntry enabledSetting = new PropertySettingEntry(behaviour, property, plugin);
+                            enabledSetting.DispName = "!Allow plugin to run on every frame";
+                            enabledSetting.Description = "Disabling this will disable some or all of the plugin's functionality.\nHooks and event-based functionality will not be disabled.\nThis setting will be lost after game restart.";
+                            enabledSetting.IsAdvanced = true;
+                            detected.Add(enabledSetting);
+                            break;
+                        }
+                    }
+
+                    if (detected.Count > 0)
+                        results = results.Concat(detected);
+                }
+                catch (Exception ex)
+                {
+                    ConfigurationManager.Logger.LogError($"Failed to collect settings of the following plugin: {plugin.Metadata?.Name ?? plugin.Metadata?.GUID}");
+                    ConfigurationManager.Logger.LogError(ex);
+                }
             }
         }
 

@@ -11,11 +11,24 @@
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)ConfigSettingEntry.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ConfigurationManager.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)ConfigurationManager.Appearance.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Localization.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)PropertySettingEntry.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SettingEntryBase.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SettingFieldDrawer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Utilities\ComboBox.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Utilities\ImguiUtils.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Utilities\ImguiCompatibility.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Utilities\ModernSkin.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Utilities\TextEditState.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Utilities\ScrollMath.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Utilities\RangeValue.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Utilities\LayoutTree.cs" Condition="'$(DefineConstants.Contains(IL2CPP))' == 'true'" />
+    <Compile Include="$(MSBuildThisFileDirectory)Utilities\ManagedLayout.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Utilities\HoverState.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Utilities\HotkeyGate.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Utilities\ModalInput.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Utilities\PluginCollapseState.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Utilities\Utilities.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ValueChangedEventArgs.cs" />
   </ItemGroup>
