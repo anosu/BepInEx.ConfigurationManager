@@ -49,8 +49,13 @@ namespace UnityEngine
     }
     public class Object
     {
+        public static int InstantiateCalls;
         public static void Destroy(Object value) { }
-        public static Object Instantiate(Object value) => new GUISkin();
+        public static Object Instantiate(Object value)
+        {
+            InstantiateCalls++;
+            return new GUISkin { font = ((GUISkin)value).font };
+        }
         public T Cast<T>() where T : Object => (T)this;
         public static T[] FindObjectsOfType<T>() => Array.Empty<T>();
     }
@@ -66,7 +71,17 @@ namespace UnityEngine
         public void Apply(bool updateMipmaps = true) { }
         public Color GetPixel(int x, int y) => Pixel;
     }
-    public class Font : Object { }
+    public class Font : Object
+    {
+        public static int CreateCalls;
+        public string[] Names;
+        public int Size;
+        private static void Internal_CreateDynamicFont(Font font, Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStringArray names, int size)
+        {
+            CreateCalls++;
+            font.Names = names.Names; font.Size = size;
+        }
+    }
     public class RectOffset { public int left, right, top, bottom; }
     public class GUIContent
     {
@@ -98,6 +113,7 @@ namespace UnityEngine
         public GUIStyleState normal = new GUIStyleState(), hover = new GUIStyleState(), active = new GUIStyleState(), focused = new GUIStyleState(),
             onNormal = new GUIStyleState(), onHover = new GUIStyleState(), onActive = new GUIStyleState(), onFocused = new GUIStyleState();
         public float fixedHeight, fixedWidth;
+        public float lineHeight => 24;
         public bool stretchWidth, stretchHeight, wordWrap;
         public TextAnchor alignment;
         public Vector2 CalcSize(GUIContent content) => new Vector2(fixedWidth > 0 ? fixedWidth : (content.text?.Length ?? 0) * 8 + padding.left + padding.right, fixedHeight > 0 ? fixedHeight : 24);
@@ -106,6 +122,7 @@ namespace UnityEngine
     public class GUIStyleState { public Texture2D background; public Color textColor; }
     public class GUISkin : Object
     {
+        public Font font;
         public GUIStyle window = new GUIStyle(), scrollView = new GUIStyle();
         public GUIStyle label = new GUIStyle { wordWrap = true }, box = new GUIStyle(), button = new GUIStyle { fixedHeight = 30 },
             toggle = new GUIStyle { fixedHeight = 30 }, textField = new GUIStyle { fixedHeight = 30, stretchWidth = true, padding = new RectOffset { left = 10, right = 10 } },
@@ -177,7 +194,11 @@ namespace UnityEngine
 }
 namespace Il2CppInterop.Runtime.InteropTypes.Arrays
 {
-    public class Il2CppStringArray { public Il2CppStringArray(string[] names) { } }
+    public class Il2CppStringArray
+    {
+        public readonly string[] Names;
+        public Il2CppStringArray(string[] names) { Names = names; }
+    }
 }
 namespace ConfigurationManager.Utilities
 {
@@ -192,8 +213,9 @@ namespace ConfigurationManager.Utilities
 namespace ConfigurationManager
 {
 #if !SETTING_CHECKS
-    internal class ConfigurationManager
+    public partial class ConfigurationManager
     {
+        private bool _tipsPluginHeaderWasClicked = false, _tipsWindowWasMoved = false;
         internal static FixtureLog Logger = new FixtureLog();
         internal class FixtureLog
         {

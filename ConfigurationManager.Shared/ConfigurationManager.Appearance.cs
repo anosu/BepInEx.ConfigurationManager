@@ -15,13 +15,23 @@ namespace ConfigurationManager
         private bool _englishFontChecked;
         private bool _chineseFontChecked;
         private GUISkin _modernSkin;
-        private GUIStyle _windowTitleStyle;
         private GUIStyle _tipStyle;
 
         private void ApplyWindowAppearance(GUISkin originalSkin)
         {
-            if (_modernSkin == null) _modernSkin = ModernSkin.Create(originalSkin);
+            PrepareWindowSkin(originalSkin);
             GUI.skin = _modernSkin;
+            var font = PrepareWindowFont();
+            if (font != null) GUI.skin.font = font;
+        }
+
+        private void PrepareWindowSkin(GUISkin originalSkin)
+        {
+            if (_modernSkin == null) _modernSkin = ModernSkin.Create(originalSkin);
+        }
+
+        private Font PrepareWindowFont()
+        {
             if (Localization.Language == Localization.SimplifiedChinese)
             {
                 if (!_chineseFontChecked)
@@ -33,7 +43,7 @@ namespace ConfigurationManager
                     }
                     catch (Exception ex) { Logger.LogWarning("Unable to load a Chinese font: " + ex.Message); }
                 }
-                if (_chineseFont != null) GUI.skin.font = _chineseFont;
+                return _chineseFont;
             }
             else
             {
@@ -43,7 +53,7 @@ namespace ConfigurationManager
                     try { _englishFont = ImguiCompatibility.CreateSystemFont(new[] { "Segoe UI", "Arial", "Liberation Sans" }, 16); }
                     catch (Exception ex) { Logger.LogWarning("Unable to load an interface font: " + ex.Message); }
                 }
-                if (_englishFont != null) GUI.skin.font = _englishFont;
+                return _englishFont;
             }
         }
 

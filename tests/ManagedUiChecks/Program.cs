@@ -278,7 +278,30 @@ Assert(!open, "Second F1 press did not close the window");
 var gameUi = new UnityEngine.EventSystems.EventSystem(true);
 var secondaryUi = new UnityEngine.EventSystems.EventSystem(true);
 var alreadyDisabled = new UnityEngine.EventSystems.EventSystem(false);
+var preparedStages = new List<string>();
+var warmup = new WindowWarmup(
+    () => { ModalInput.Prepare(); preparedStages.Add("input"); },
+    () => preparedStages.Add("skin"),
+    () => preparedStages.Add("font"));
+warmup.Advance(10, true);
+Assert(preparedStages.Count == 0, "Warmup added preparation work to a visible window frame");
+warmup.Advance(11, false); warmup.Advance(11, false);
+Assert(preparedStages.SequenceEqual(new[] { "input" }), "Warmup ran multiple expensive stages in one frame");
+Assert(ModalInput.AllowGameInput(), "Preparing input hooks activated modality while the window was hidden");
+var uiUpdateBeforeOpening = typeof(UnityEngine.EventSystems.EventSystem).GetMethod("Update", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+HarmonyLib.Harmony.Invoke(uiUpdateBeforeOpening, gameUi);
+Assert(gameUi.ProcessCount == 1, "Passive warmup blocked game input");
+gameUi.ProcessCount = 0;
+warmup.Advance(12, false); warmup.Advance(13, false); warmup.Advance(14, false);
+Assert(preparedStages.SequenceEqual(new[] { "input", "skin", "font" }), "Warmup skipped or repeated a stage");
+var failedWarmup = new WindowWarmup(() => throw new InvalidOperationException("Injected warmup failure"), () => preparedStages.Add("recovered"));
+try { failedWarmup.Advance(20, false); }
+catch (InvalidOperationException ex) when (ex.Message == "Injected warmup failure") { }
+failedWarmup.Advance(20, false); failedWarmup.Advance(21, false);
+Assert(preparedStages.Last() == "recovered", "Failed warmup blocked subsequent preparation");
+var coldPatchCount = HarmonyLib.Harmony.PatchCount;
 ModalInput.SetActive(true);
+Assert(HarmonyLib.Harmony.PatchCount == coldPatchCount, "First modal activation installed input hooks on the opening path instead of preparing them while hidden");
 Assert(UnityEngine.EventSystems.EventSystem.current == gameUi,
     "Modal opening removed EventSystem.current used by the game's touch queries");
 Assert(gameUi.enabled && secondaryUi.enabled && !alreadyDisabled.enabled, "Modal opening changed EventSystem component states");
@@ -307,6 +330,7 @@ Assert(gameUi.ProcessCount == 1 && gameInput.DispatchCount == 2, "Closing did no
 Assert(gameUi.enabled && secondaryUi.enabled && !alreadyDisabled.enabled && sceneUi.enabled, "Closing changed game UI enable states");
 ModalInput.SetActive(true); ModalInput.SetActive(false);
 Assert(installed == HarmonyLib.Harmony.PatchCount && ModalInput.AllowGameInput(), "Reopening/destruction left stale or duplicate input guards");
+Console.WriteLine("PASS: hidden warmup runs one stage per frame, preserves input and removes hook installation from first modal activation.");
 
 var original = new GUISkin();
 original.button.fixedWidth = 20;
@@ -339,5 +363,48 @@ ImguiCompatibility.ClearInput();
 Assert(GUIUtility.hotControl == 12345 && GUIUtility.keyboardControl == 54321, "Cleanup released another GUI owner's controls");
 GUIUtility.hotControl = GUIUtility.keyboardControl = 0;
 Console.WriteLine("PASS: closing releases only editor-owned mouse and keyboard controls.");
+
+// Exercise production appearance preparation, not substitute warmup callbacks.
+var appearance = new ConfigurationManager.ConfigurationManager();
+var gameSkin = GUI.skin;
+gameSkin.font = new Font();
+var gameFont = gameSkin.font;
+object AppearanceCall(ConfigurationManager.ConfigurationManager instance, string name, params object[] args) =>
+    typeof(ConfigurationManager.ConfigurationManager).GetMethod(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(instance, args);
+var initialSkinCopies = UnityEngine.Object.InstantiateCalls;
+var initialFontCreations = Font.CreateCalls;
+try
+{
+    ConfigurationManager.Localization.Language = ConfigurationManager.Localization.English;
+    AppearanceCall(appearance, "PrepareWindowSkin", gameSkin);
+    var englishFont = (Font)AppearanceCall(appearance, "PrepareWindowFont")!;
+    AppearanceCall(appearance, "PrepareWindowSkin", gameSkin);
+    Assert(ReferenceEquals(englishFont, AppearanceCall(appearance, "PrepareWindowFont")), "Repeated preparation recreated the English font");
+    Assert(ReferenceEquals(GUI.skin, gameSkin) && ReferenceEquals(gameSkin.font, gameFont), "Hidden preparation modified the active game's GUI skin/font");
+    Assert(UnityEngine.Object.InstantiateCalls == initialSkinCopies + 1 && Font.CreateCalls == initialFontCreations + 1,
+        "Repeated preparation allocated duplicate skin/font resources");
+    AppearanceCall(appearance, "ApplyWindowAppearance", gameSkin);
+    var preparedSkin = GUI.skin;
+    Assert(!ReferenceEquals(preparedSkin, gameSkin) && ReferenceEquals(preparedSkin.font, englishFont), "Opening did not apply prepared appearance resources");
+    ConfigurationManager.Localization.Language = ConfigurationManager.Localization.SimplifiedChinese;
+    var chineseFont = (Font)AppearanceCall(appearance, "PrepareWindowFont")!;
+    Assert(chineseFont.Size == 17 && chineseFont.Names.Contains("Microsoft YaHei"), "Chinese font preparation used the wrong language/size");
+    AppearanceCall(appearance, "ApplyWindowAppearance", gameSkin);
+    Assert(ReferenceEquals(GUI.skin, preparedSkin) && ReferenceEquals(preparedSkin.font, chineseFont), "Language switching replaced the skin or omitted the prepared font");
+    ConfigurationManager.Localization.Language = ConfigurationManager.Localization.English;
+    AppearanceCall(appearance, "ApplyWindowAppearance", gameSkin);
+    Assert(Font.CreateCalls == initialFontCreations + 2 && ReferenceEquals(preparedSkin.font, englishFont), "Switching back recreated a cached font");
+    var earlyAppearance = new ConfigurationManager.ConfigurationManager();
+    AppearanceCall(earlyAppearance, "ApplyWindowAppearance", gameSkin);
+    var earlySkinCopies = UnityEngine.Object.InstantiateCalls; var earlyFontCreations = Font.CreateCalls;
+    GUI.skin = gameSkin;
+    AppearanceCall(earlyAppearance, "PrepareWindowSkin", gameSkin);
+    AppearanceCall(earlyAppearance, "PrepareWindowFont");
+    Assert(UnityEngine.Object.InstantiateCalls == earlySkinCopies && Font.CreateCalls == earlyFontCreations,
+        "Preparation after early opening recreated existing resources");
+    Assert(ReferenceEquals(GUI.skin, gameSkin) && ReferenceEquals(gameSkin.font, gameFont), "Preparation after early opening leaked GUI state");
+}
+finally { GUI.skin = gameSkin; ConfigurationManager.Localization.Language = ConfigurationManager.Localization.English; }
+Console.WriteLine("PASS: production appearance preparation preserves the game skin and reuses skin/fonts across opening, language changes and early fallback.");
 
 void Assert(bool condition, string message) { if (!condition) throw new Exception(message); }

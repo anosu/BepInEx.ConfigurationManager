@@ -103,6 +103,9 @@ namespace ConfigurationManager
         private readonly ConfigEntry<string> _language;
         private bool _showDebug;
         private readonly HotkeyGate _hotkeyGate = new HotkeyGate();
+        private WindowWarmup _windowWarmup;
+        private bool _initialSettingsTimingLogged;
+        private GUIStyle _windowTitleStyle;
 
         /// <inheritdoc />
         public ConfigurationManager()
@@ -226,12 +229,18 @@ namespace ConfigurationManager
         /// </summary>
         public void BuildSettingList()
         {
+            var timer = System.Diagnostics.Stopwatch.StartNew();
             SettingSearcher.CollectSettings(out var results, out var modsWithoutSettings, _showDebug);
 
             _modsWithoutSettings = string.Join(", ", modsWithoutSettings.Select(x => x.TrimStart('!')).OrderBy(x => x).ToArray());
             _allSettings = results.ToList();
 
             BuildFilteredSettingList();
+            if (!_initialSettingsTimingLogged)
+            {
+                _initialSettingsTimingLogged = true;
+                Logger.LogInfo($"Initial settings collection: {_allSettings.Count} entries in {timer.Elapsed.TotalMilliseconds:F1} ms");
+            }
         }
 
         private void BuildFilteredSettingList()
@@ -312,6 +321,8 @@ namespace ConfigurationManager
         {
             var evt = Event.current;
             HandleShortcutEvent(evt);
+            if (_windowWarmup != null && evt.type == EventType.Repaint)
+                _windowWarmup.Advance(Time.frameCount, DisplayingWindow);
             if (DisplayingWindow)
             {
                 SetUnlockCursor(0, true);
@@ -725,6 +736,22 @@ namespace ConfigurationManager
             try { Config.Save(); }
             catch (IOException ex) { Logger.Log(LogLevel.Message | LogLevel.Warning, "WARNING: Failed to write to config directory, expect issues!\nError message:" + ex.Message); }
             catch (UnauthorizedAccessException ex) { Logger.Log(LogLevel.Message | LogLevel.Warning, "WARNING: Permission denied to write to config directory, expect issues!\nError message:" + ex.Message); }
+
+            // GUI skin access belongs in OnGUI, and Unity resource creation stays on the main thread.
+            _windowWarmup = new WindowWarmup(
+#if IL2CPP
+                () => PrepareWindowStep("modal input", ModalInput.Prepare),
+#endif
+                () => PrepareWindowStep("skin", () => PrepareWindowSkin(GUI.skin)),
+                () => PrepareWindowStep("font", () => { PrepareWindowFont(); }));
+        }
+
+        private static void PrepareWindowStep(string name, Action prepare)
+        {
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            try { prepare(); }
+            catch (Exception ex) { Logger.LogWarning("Failed to prepare window " + name + ": " + ex); }
+            finally { Logger.LogInfo($"Window warmup [{name}]: {timer.Elapsed.TotalMilliseconds:F1} ms"); }
         }
 
         private void Update()

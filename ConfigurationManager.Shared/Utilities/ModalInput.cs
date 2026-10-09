@@ -18,7 +18,13 @@ namespace ConfigurationManager.Utilities
             if (_active == active) return;
             _active = active;
             if (!active) return;
+            Prepare();
+        }
 
+        internal static void Prepare()
+        {
+            // Installing a passive prefix does not activate the modal gate.
+            if (_harmony != null && Patched.Count > 0) return;
             // Keep EventSystem.current and its input module alive for game-side raycasts.
             // Suppress dispatch instead of disabling the component and removing it from current.
             try
@@ -26,7 +32,6 @@ namespace ConfigurationManager.Utilities
                 if (_harmony == null) _harmony = new Harmony("com.bepis.bepinex.configurationmanager.modal-input");
                 const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
                 TryPatch(typeof(EventSystem).GetMethod("Update", flags), "EventSystem.Update");
-
             }
             catch (Exception ex)
             {

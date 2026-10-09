@@ -34,6 +34,12 @@ Search updates immediately. Reset has a fixed readable text button, and numeric 
 Plugin expansion is tracked by GUID and survives temporary filtering; Expand All / Collapse All resets that state.
 Dropdowns close when their setting is hidden or disabled. An empty search/filter result displays a localized hint.
 
+After startup, the manager prepares its modal input hook (IL2CPP), skin and current language's font on separate hidden repaint frames.
+Preparation stays on Unity's main thread, leaves the game's GUI skin unchanged and does not activate the modal input gate.
+Opening before preparation completes uses the normal initialization path. Settings are still collected on every opening so dynamic configurations remain current.
+`Window warmup [...]` and `Initial settings collection` log entries report stage durations to help investigate remaining first-open delays.
+This spreads initialization work rather than eliminating its total cost; native JIT, font glyph creation and game load can still cause a stall.
+
 点击搜索框旁的 `Language: English` 按钮可切换到简体中文，再次点击可切回英文。语言选择会自动保存。
 中文显示优先使用系统中的微软雅黑、黑体或 Noto Sans CJK SC 等字体；若显示方框，请安装支持中文的字体并重启游戏。
 

@@ -29,6 +29,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Utilities\HotkeyGate.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Utilities\ModalInput.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Utilities\PluginCollapseState.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Utilities\WindowWarmup.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Utilities\Utilities.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ValueChangedEventArgs.cs" />
   </ItemGroup>

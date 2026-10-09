@@ -6,6 +6,8 @@
     <DefineConstants>$(DefineConstants);IL2CPP</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../ConfigurationManager.Shared/ConfigurationManager.Appearance.cs" Link="ConfigurationManager.Appearance.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/Localization.cs" Link="Localization.cs" />
     <Compile Include="../../ConfigurationManager.Shared/Utilities/LayoutTree.cs" Link="LayoutTree.cs" />
     <Compile Include="../../ConfigurationManager.Shared/Utilities/ManagedLayout.cs" Link="ManagedLayout.cs" />
     <Compile Include="../../ConfigurationManager.Shared/Utilities/ImguiCompatibility.cs" Link="ImguiCompatibility.cs" />
@@ -17,5 +19,6 @@
     <Compile Include="../../ConfigurationManager.Shared/Utilities/HotkeyGate.cs" Link="HotkeyGate.cs" />
     <Compile Include="../../ConfigurationManager.Shared/Utilities/ModalInput.cs" Link="ModalInput.cs" />
     <Compile Include="../../ConfigurationManager.Shared/Utilities/PluginCollapseState.cs" Link="PluginCollapseState.cs" />
+    <Compile Include="../../ConfigurationManager.Shared/Utilities/WindowWarmup.cs" Link="WindowWarmup.cs" />
   </ItemGroup>
 </Project>

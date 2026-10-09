@@ -1,5 +1,13 @@
 # Changelog
 
+## 19.1.8
+
+- Prepare the generic IL2CPP modal hook, skin and active language's system font on separate hidden repaint frames after startup, reducing work on the first-open path.
+- Keep preparation on Unity's main thread without changing the active game skin or blocking input while the window is hidden.
+- Preserve normal initialization when opening early and continue collecting current plugin settings on every opening.
+- Log preparation-stage and initial-settings-collection durations; add regression checks for per-frame scheduling, passive input preparation and first-open hook reuse.
+- Preparation distributes initialization cost; native JIT/font glyph work and game-side load still require in-game timing before claiming a specific latency improvement.
+
 ## 19.1.7
 
 ### Interface and editing
