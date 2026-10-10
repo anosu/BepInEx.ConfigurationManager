@@ -40,6 +40,10 @@ Opening before preparation completes uses the normal initialization path. Settin
 `Window warmup [...]` and `Initial settings collection` log entries report stage durations to help investigate remaining first-open delays.
 This spreads initialization work rather than eliminating its total cost; native JIT, font glyph creation and game load can still cause a stall.
 
+On IL2CPP, backdrop and editor texture painting use repaint-only `GUIStyle.Draw`, bypassing `GUI.DrawTexture` wrappers
+that may be restored as failure stubs. Dynamic font creation uses the IL2CPP pointer wrapper and native factory so it does not depend
+on a parameterless `Font` constructor being present. The Mono rendering and font paths remain native Unity calls.
+
 点击搜索框旁的 `Language: English` 按钮可切换到简体中文，再次点击可切回英文。语言选择会自动保存。
 中文显示优先使用系统中的微软雅黑、黑体或 Noto Sans CJK SC 等字体；若显示方框，请安装支持中文的字体并重启游戏。
 
@@ -73,6 +77,7 @@ WindowChecks prepares the window call and plugin/shortcut method bodies for JIT 
 the specified game's assemblies without launching the game, including constructors and static initializers.
 Its self-test verifies failure stubs reachable only from these startup paths. It also traverses calls into Unity methods and rejects
 reachable `Method unstripping failed` stubs or missing references. This validates managed compatibility, not native execution or visual layout.
+The reflected dynamic-font factory is included explicitly; JIT failures and reachable failure stubs are reported together.
 It also resolves the Unity EventSystem input-dispatch hook target against the supplied interop assemblies.
 The IL2CPP manager computes the full layout tree in managed code and draws through basic `GUI` primitives.
 It does not create native GUILayout groups, allocate GUILayout rectangles or construct native layout options.

@@ -45,7 +45,7 @@ namespace ConfigurationManager.Utilities
                 _texCache[cacheKey] = texture;
             }
 
-            GUI.DrawTexture(position, texture, ScaleMode.StretchToFill, true);
+            ImguiCompatibility.DrawTexture(position, texture);
         }
 
 #if NETSTANDARD || NETCOREAPP

@@ -367,7 +367,7 @@ Console.WriteLine("PASS: closing releases only editor-owned mouse and keyboard c
 // Exercise production appearance preparation, not substitute warmup callbacks.
 var appearance = new ConfigurationManager.ConfigurationManager();
 var gameSkin = GUI.skin;
-gameSkin.font = new Font();
+gameSkin.font = new Font(IntPtr.Zero);
 var gameFont = gameSkin.font;
 object AppearanceCall(ConfigurationManager.ConfigurationManager instance, string name, params object[] args) =>
     typeof(ConfigurationManager.ConfigurationManager).GetMethod(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(instance, args);
@@ -406,5 +406,19 @@ try
 }
 finally { GUI.skin = gameSkin; ConfigurationManager.Localization.Language = ConfigurationManager.Localization.English; }
 Console.WriteLine("PASS: production appearance preparation preserves the game skin and reuses skin/fonts across opening, language changes and early fallback.");
+
+var texturePaints = GUI.PaintedRects.Count;
+var textureControlCalls = GUI.ControlCalls;
+Event.current = new Event { type = EventType.Layout };
+ImguiCompatibility.DrawTexture(new Rect(0, 0, 30, 20), Texture2D.whiteTexture);
+Assert(GUI.PaintedRects.Count == texturePaints && GUI.ControlCalls == textureControlCalls,
+    "Texture adapter paints or allocates controls during Layout");
+Event.current = new Event { type = EventType.Repaint };
+ImguiCompatibility.DrawTexture(new Rect(0, 0, 30, 20), Texture2D.whiteTexture);
+Assert(GUI.PaintedRects.Count == texturePaints + 1 && GUI.ControlCalls == textureControlCalls,
+    "Texture adapter skipped Repaint or shifted later control IDs");
+Assert(GUI.PaintedRects.Last().Rect.width == 30 && GUI.PaintedRects.Last().Rect.height == 20,
+    "Texture adapter changed the paint rectangle");
+Console.WriteLine("PASS: stripped DrawTexture is bypassed without changing layout/repaint control IDs; Font preparation needs no parameterless constructor.");
 
 void Assert(bool condition, string message) { if (!condition) throw new Exception(message); }

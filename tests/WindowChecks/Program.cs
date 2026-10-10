@@ -42,12 +42,20 @@ var eventUpdate = ui.GetType("UnityEngine.EventSystems.EventSystem", true)!.GetM
 var inputTargets = new List<MethodBase> { eventUpdate };
 foreach (var target in inputTargets) RuntimeHelpers.PrepareMethod(target.MethodHandle);
 Console.WriteLine($"PASS: {inputTargets.Count} modal input hook targets JIT resolve against the game's actual assemblies.");
+// Reflection hides this factory from the ordinary reachable-call scan; validate its target explicitly.
+var fontType = context.LoadFromAssemblyPath(Path.Combine(interop, "UnityEngine.TextRenderingModule.dll")).GetType("UnityEngine.Font", true)!;
+var fontFactory = fontType.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+    .Single(m => m.Name == "Internal_CreateDynamicFont" && m.GetParameters().Length == 3);
+RuntimeHelpers.PrepareMethod(fontFactory.MethodHandle);
+Console.WriteLine("PASS: reflected Font.Internal_CreateDynamicFont target JIT resolves against the game's actual assemblies.");
 var plugin = context.LoadFromAssemblyPath(Path.Combine(pluginDirectory, "ConfigurationManager.dll"));
 var assemblies = new[] { plugin, context.LoadFromAssemblyPath(Path.Combine(pluginDirectory, "BepInEx.KeyboardShortcut.dll")) };
 var count = 0;
 var constructors = 0;
 var initializers = 0;
+var jitFailures = new List<string>();
 var pending = new Queue<MethodBase>(inputTargets);
+pending.Enqueue(fontFactory);
 foreach (var assembly in assemblies)
 {
     foreach (var type in assembly.GetTypes().Where(type => !type.ContainsGenericParameters))
@@ -57,7 +65,7 @@ foreach (var assembly in assemblies)
             if (method.IsAbstract || method.ContainsGenericParameters || method.GetMethodBody() == null)
                 continue;
             try { RuntimeHelpers.PrepareMethod(method.MethodHandle); }
-            catch (Exception ex) { throw new Exception("JIT compatibility failure in " + type.FullName + "." + method.Name, ex); }
+            catch (Exception ex) { jitFailures.Add(type.FullName + "." + method.Name + ": " + ex.Message); }
             count++;
             if (method is ConstructorInfo) { if (method.IsStatic) initializers++; else constructors++; }
             pending.Enqueue(method);
@@ -65,11 +73,13 @@ foreach (var assembly in assemblies)
     }
 }
 if (constructors == 0 || initializers == 0) throw new Exception("Startup constructors/initializers were not checked.");
-Console.WriteLine($"PASS: {count} plugin/shortcut bodies, including {constructors} constructors and {initializers} static initializers, JIT resolve against the game's actual assemblies.");
+if (jitFailures.Count == 0)
+    Console.WriteLine($"PASS: {count} plugin/shortcut bodies, including {constructors} constructors and {initializers} static initializers, JIT resolve against the game's actual assemblies.");
 
 var failures = ScanUnavailable(pending, assemblies, out var reachable);
-if (failures.Count > 0)
-    throw new Exception("Reachable unavailable IMGUI methods:\n" + string.Join("\n", failures.Order()));
+if (failures.Count > 0 || jitFailures.Count > 0)
+    throw new Exception("JIT compatibility failures:\n" + string.Join("\n", jitFailures) +
+        "\nReachable unavailable IMGUI methods:\n" + string.Join("\n", failures.Order()));
 Console.WriteLine($"PASS: {reachable} reachable methods contain no unstripping-failure stubs, missing references or invalid GUILayout CLR boxing.");
 
 IEnumerable<MethodBase> GetBodies(Type type)

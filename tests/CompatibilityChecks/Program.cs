@@ -31,6 +31,17 @@ foreach (var assemblyPath in paths.Where(File.Exists))
             if (member.Parent.Kind != HandleKind.TypeReference)
                 continue;
             var owner = metadata.GetTypeReference((TypeReferenceHandle)member.Parent);
+            if (metadata.GetString(owner.Namespace) == "UnityEngine" && metadata.GetString(owner.Name) == "GUI" &&
+                metadata.GetString(member.Name) == "DrawTexture")
+                throw new Exception("Unstripping regression: IL2CPP texture painting must avoid restored GUI.DrawTexture overloads.");
+            if (metadata.GetString(owner.Namespace) == "UnityEngine" && metadata.GetString(owner.Name) == "Font" &&
+                metadata.GetString(member.Name) == ".ctor")
+            {
+                var signature = metadata.GetBlobReader(member.Signature);
+                signature.ReadSignatureHeader();
+                if (signature.ReadCompressedInteger() == 0)
+                    throw new Exception("MissingMethod regression: IL2CPP font preparation must not require Font's parameterless constructor.");
+            }
             if (metadata.GetString(owner.Namespace) == "UnityEngine" &&
                 metadata.GetString(owner.Name) == "GUI" && metadata.GetString(member.Name) == "Window")
                 throw new Exception("Modal regression: IL2CPP must use GUI.ModalWindow rather than a modeless GUI.Window.");
@@ -46,6 +57,7 @@ foreach (var assemblyPath in paths.Where(File.Exists))
 Console.WriteLine("PASS: plugin and shortcut DLLs have no hard dependency on optional IL2CPP input/shortcut types.");
 Console.WriteLine("PASS: IL2CPP window drawing avoids the stripped GUILayout.LayoutedWindow helper.");
 Console.WriteLine("PASS: IL2CPP drawing has no native GUILayout groups, rect allocation or layout options.");
+Console.WriteLine("PASS: IL2CPP texture/font preparation avoids stripped DrawTexture and parameterless Font constructor references.");
 
 var translations = (Dictionary<string, string>)typeof(ConfigurationManager.Localization)
     .GetField("Chinese", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!.GetValue(null)!;

@@ -6,6 +6,7 @@ using GUILayout = ConfigurationManager.Utilities.ManagedLayout;
 using GUILayoutUtility = ConfigurationManager.Utilities.ManagedLayout;
 using GUILayoutOption = ConfigurationManager.Utilities.LayoutOption;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
+using Il2CppInterop.Runtime;
 #endif
 
 namespace ConfigurationManager.Utilities
@@ -424,7 +425,7 @@ namespace ConfigurationManager.Utilities
         private static void Paint(Rect rect, Color color)
         {
             var previous = GUI.color;
-            try { GUI.color = color; GUI.DrawTexture(rect, Texture2D.whiteTexture); }
+            try { GUI.color = color; DrawTexture(rect, Texture2D.whiteTexture); }
             finally { GUI.color = previous; }
         }
         private static void DrawTextField(Rect rect, TextEditState state, bool focused)
@@ -454,6 +455,29 @@ namespace ConfigurationManager.Utilities
             finally { GUI.EndClip(); }
         }
 #endif
+        public static void DrawTexture(Rect rect, Texture2D texture)
+        {
+#if IL2CPP
+            // Style.Draw paints without allocating a GUI control ID. Restored GUI.DrawTexture
+            // overloads can funnel into an unstripping-failure stub in otherwise usable IMGUI builds.
+            if (Event.current.type != EventType.Repaint) return;
+            if (_textureStyle == null)
+            {
+                _textureStyle = GUIStyle.none.CreateCopy();
+                _textureStyle.border = ModernSkin.Offset(0, 0, 0, 0);
+                _textureStyle.padding = ModernSkin.Offset(0, 0, 0, 0);
+                _textureStyle.margin = ModernSkin.Offset(0, 0, 0, 0);
+                _textureStyle.overflow = ModernSkin.Offset(0, 0, 0, 0);
+            }
+            _textureStyle.normal.background = texture;
+            _textureStyle.Draw(rect, GUIContent.none, false, false, false, false);
+#else
+            GUI.DrawTexture(rect, texture);
+#endif
+        }
+#if IL2CPP
+        private static GUIStyle _textureStyle;
+#endif
         public static void FocusNextTextField()
         {
 #if IL2CPP
@@ -476,7 +500,9 @@ namespace ConfigurationManager.Utilities
         public static Font CreateSystemFont(string[] names, int size)
         {
 #if IL2CPP
-            var font = new Font();
+            // Some games strip every managed Font constructor except the pointer wrapper.
+            // Allocate the IL2CPP object; the native factory below initializes its Unity font.
+            var font = new Font(IL2CPP.il2cpp_object_new(Il2CppClassPointerStore<Font>.NativeClassPtr));
             try
             {
                 var factory = typeof(Font).GetMethod("Internal_CreateDynamicFont",

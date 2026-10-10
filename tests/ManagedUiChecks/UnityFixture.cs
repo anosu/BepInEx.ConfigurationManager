@@ -73,6 +73,7 @@ namespace UnityEngine
     }
     public class Font : Object
     {
+        public Font(IntPtr pointer) { }
         public static int CreateCalls;
         public string[] Names;
         public int Size;
@@ -118,6 +119,11 @@ namespace UnityEngine
         public TextAnchor alignment;
         public Vector2 CalcSize(GUIContent content) => new Vector2(fixedWidth > 0 ? fixedWidth : (content.text?.Length ?? 0) * 8 + padding.left + padding.right, fixedHeight > 0 ? fixedHeight : 24);
         public float CalcHeight(GUIContent content, float width) => wordWrap ? Math.Max(24, (float)Math.Ceiling(CalcSize(content).x / Math.Max(1, width)) * 24) : 24;
+        public void Draw(Rect rect, GUIContent content, bool hover, bool active, bool on, bool focused)
+        {
+            if (Event.current.type != EventType.Repaint) throw new InvalidOperationException("Style.Draw requires Repaint");
+            GUI.PaintedRects.Add((rect, GUI.color));
+        }
     }
     public class GUIStyleState { public Texture2D background; public Color textColor; }
     public class GUISkin : Object
@@ -168,7 +174,7 @@ namespace UnityEngine
             return false;
         }
         public static bool Toggle(Rect rect, bool value, string text, GUIStyle style) => Button(rect, new GUIContent(text), style) ? !value : value;
-        public static void DrawTexture(Rect rect, Texture texture) => PaintedRects.Add((rect, color));
+        public static void DrawTexture(Rect rect, Texture texture) => throw new NotSupportedException("Method unstripping failed");
     }
     public static class GUIUtility
     {
@@ -198,6 +204,14 @@ namespace Il2CppInterop.Runtime.InteropTypes.Arrays
     {
         public readonly string[] Names;
         public Il2CppStringArray(string[] names) { Names = names; }
+    }
+}
+namespace Il2CppInterop.Runtime
+{
+    public static class Il2CppClassPointerStore<T> { public static IntPtr NativeClassPtr = new IntPtr(1); }
+    public static class IL2CPP
+    {
+        public static IntPtr il2cpp_object_new(IntPtr classPointer) => classPointer;
     }
 }
 namespace ConfigurationManager.Utilities

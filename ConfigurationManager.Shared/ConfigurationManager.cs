@@ -343,7 +343,7 @@ namespace ConfigurationManager
                     ApplyWindowAppearance(originalSkin);
 #if IL2CPP
                     GUI.color = new Color(0, 0, 0, 0.55f);
-                    GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture);
+                    ImguiCompatibility.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture);
                     GUI.color = Color.white;
                     newRect = GUI.ModalWindow(WindowId, SettingWindowRect, (GUI.WindowFunction)SettingsWindow, string.Empty);
 #else

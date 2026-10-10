@@ -1,5 +1,12 @@
 # Changelog
 
+## 19.1.9
+
+- Bypass stripped IL2CPP `GUI.DrawTexture` overloads using repaint-only `GUIStyle.Draw` for the backdrop, editor caret/selection and control textures, without allocating extra control IDs.
+- Create dynamic-font wrappers from a newly allocated IL2CPP object and initialize them through the native font factory, avoiding a parameterless `Font` constructor that some games omit.
+- Extend compatibility checks to reject the old texture/font references, validate the reflected font factory and report all JIT failures alongside reachable failure stubs.
+- Regression fixtures model a throwing `DrawTexture` and a Font type with only its pointer constructor. Static interop checks pass against both supplied games; native visual/font behavior still requires in-game validation.
+
 ## 19.1.8
 
 - Prepare the generic IL2CPP modal hook, skin and active language's system font on separate hidden repaint frames after startup, reducing work on the first-open path.
